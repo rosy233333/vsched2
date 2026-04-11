@@ -3,6 +3,7 @@
 #![no_std]
 #![deny(missing_docs)]
 
+mod arch;
 mod current;
 mod interface;
 mod schedule_loop;
