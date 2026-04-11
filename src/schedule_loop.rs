@@ -4,15 +4,13 @@
 //!
 //! 几个函数的运行顺序：`trap_entry` -> `run_task`，`schedule` -> `run_task`，之后在`schedule`和`run_task`中循环，使用`jmp`相互跳转实现循环
 
-use crate::interface::{Task, TaskState};
-use crate::stack::*;
-use vdso_helper::get_vvar_data;
-
 use crate::{
     current::get_current_task,
-    interface::{SMPVirtImpl, Task, SMP},
+    interface::{SMPVirtImpl, Task, TaskState, SMP},
     jump,
+    stack::*,
 };
+use vdso_helper::get_vvar_data;
 
 /// 内核态同步trap入口
 ///
@@ -91,8 +89,9 @@ pub extern "C" fn utok_schedule() {
 /// 运行当前地址空间和特权级中的任务
 ///
 /// 根据任务类型（线程或协程）切换或回收栈，并恢复上下文
-// #[no_mangle]
-pub extern "C" fn run_task(next_task: impl Task) {
+#[no_mangle]
+pub extern "C" fn run_task() {
+    let next_task = get_current_task();
     next_task.set_state(TaskState::Running);
     if next_task.is_coroutine() {
         // 切换或回收栈

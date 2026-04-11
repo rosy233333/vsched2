@@ -1,6 +1,4 @@
-use crate::{
-    interface::{Stack, StackVirtImpl},
-};
+use crate::interface::{Stack, StackVirtImpl, STACK_POOL_SIZE};
 use heapless::vec::Vec;
 
 /// 获取sp指针
@@ -44,13 +42,13 @@ fn get_stack_type(stack_base: usize) -> usize {
 /// 对栈进行封装
 ///
 /// 用来储存栈基址，后续可以加入新的内容。通过调用 alloc 和 dealloc 接口进行栈的分配和回收
-/// 
+///
 /// ### 注意
-/// 
+///
 /// 这里需要保证之后对 Task 进行封装时，线程的栈使用的是 StackWapper，否则在栈池中的`switch_to_thread_stack`会错误的调用 Drop
-/// 
+///
 /// ### TODO
-/// 
+///
 /// 考虑使用 manually drop 来解决上述问题
 pub struct StackWapper {
     /// 栈基址
@@ -77,11 +75,6 @@ impl Drop for StackWapper {
         StackVirtImpl::dealloc(self.base as *mut ());
     }
 }
-
-/// 栈池大小
-///
-/// TODO: 后续需要讨论调整
-const STACK_POOL_SIZE: usize = 16;
 
 /// 用户态的栈池管理器
 ///
@@ -123,7 +116,7 @@ impl StackHandler {
     /// 切换到线程栈
     ///
     /// 对应蓝色框部分
-    /// 
+    ///
     /// TODO: 在`StackWapper`使用`manually_drop`后需要修改这里的实现
     pub fn switch_to_thread_stack(&mut self, thread_stack: StackWapper) {
         let thread_stack_base = thread_stack.base;
