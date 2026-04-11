@@ -7,7 +7,7 @@
 use crate::{
     current::get_current_task,
     interface::{SMPVirtImpl, Task, TaskState, SMP},
-    jump,
+    reset_stack_and_jump,
     stack::*,
 };
 use vdso_helper::get_vvar_data;
@@ -47,10 +47,9 @@ pub extern "C" fn thread_entry() {
         get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].load(core::sync::atomic::Ordering::Acquire)
     };
     if in_kernel {
-        // 不知道此时栈中是否有内容（例如in_kernel）
-        jump!(kschedule);
+        reset_stack_and_jump!(kschedule);
     } else {
-        jump!(uschedule);
+        reset_stack_and_jump!(uschedule);
     }
 }
 

@@ -1,8 +1,9 @@
 //! 任务调度相关的数据结构与操作
 
-use spin::mutex::SpinMutex;
+use heapless::Vec;
+use spin::{mutex::SpinMutex, rwlock::RwLock};
 
-use crate::interface::{EventSorceVtable, EVENT_SORCE_LEN, PROCESS_NUM};
+use crate::interface::{EventSorceVtable, EVENT_SORCE_NUM, PROCESS_NUM};
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize};
 
 /// 调度器数据结构
@@ -10,7 +11,11 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize};
 /// 每个进程的用户部分持有一个调度器实例；所有内核任务共享一个调度器实例。
 pub(crate) struct Scheduler {
     /// 事件源数组
-    sources: [SpinMutex<(*const (), EventSorceVtable)>; EVENT_SORCE_LEN],
+    ///
+    /// 当前的RwLock仅保护事件源插入（申请写锁）与事件源查询（申请读锁）的冲突，并未保护多个事件源查询操作间的同步问题。
+    ///
+    /// 也就是要求事件源自身实现内部可变性和与之适配的同步机制。
+    sources: RwLock<Vec<(*const (), EventSorceVtable), EVENT_SORCE_NUM>>,
     /// 当前事件源数量
     source_num: AtomicUsize,
     /// 全局进程表中的索引，同时作为进程号使用
