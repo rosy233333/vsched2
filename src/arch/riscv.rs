@@ -30,3 +30,29 @@ macro_rules! reset_stack_and_jump {
         }
     };
 }
+
+/// 设置sp寄存器的值。
+#[macro_export]
+macro_rules! set_sp {
+    ($f:ident) => {
+        unsafe {
+            core::arch::asm!("
+                mv sp, {}
+            ", in(reg) $f, options(nostack));
+        }
+    };
+}
+
+/// 获取sp寄存器的值。
+#[macro_export]
+macro_rules! get_sp {
+    () => {
+        unsafe {
+            let sp: usize;
+            core::arch::asm!("
+                mv {}, sp
+            ", out(reg) sp, options(nostack));
+            sp
+        }
+    };
+}

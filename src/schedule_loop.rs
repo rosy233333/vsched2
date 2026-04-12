@@ -5,10 +5,9 @@
 //! 几个函数的运行顺序：`trap_entry` -> `run_task`，`schedule` -> `run_task`，之后在`schedule`和`run_task`中循环，使用`jmp`相互跳转实现循环
 
 use crate::{
-    current::get_current_task,
-    interface::{SMPVirtImpl, Task, TaskState, SMP},
-    reset_stack_and_jump,
-    stack::*,
+    current::{STACK_HANDLER, get_current_task},
+    interface::{SMP, SMPVirtImpl, Task, TaskState},
+    reset_stack_and_jump, set_sp,
 };
 use vdso_helper::get_vvar_data;
 
@@ -90,12 +89,15 @@ pub extern "C" fn utok_schedule() {
 /// 根据任务类型（线程或协程）切换或回收栈，并恢复上下文
 #[no_mangle]
 pub extern "C" fn run_task() {
-    let next_task = get_current_task();
-    next_task.set_state(TaskState::Running);
-    if next_task.is_coroutine() {
+    if get_current_task().is_coroutine() {
         // 切换或回收栈
-        // 恢复上下文
-        todo!()
+        let new_sp = {
+            let mut stack_handler = STACK_HANDLER.lock();
+            stack_handler.get_empty_stack()
+        };
+        unsafe {
+            core::arch::asm!("call coroutine_trampoline", in("a0") new_sp, options(noreturn));
+        }
     } else {
         // 切换或回收栈
         // 恢复上下文

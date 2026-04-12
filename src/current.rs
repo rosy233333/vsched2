@@ -7,11 +7,12 @@ use core::{
 };
 
 use lazyinit::LazyInit;
+use spin::mutex::SpinMutex;
 use vdso_helper::{get_vvar_data, vvar_data};
 
 use crate::{
-    interface::{SMPVirtImpl, TaskVirtImpl, CPU_NUM, SMP},
-    scheduler::{ProcessInfoTable, Scheduler},
+    interface::{CPU_NUM, SMP, SMPVirtImpl, TaskVirtImpl},
+    scheduler::{ProcessInfoTable, Scheduler}, stack::StackHandler,
 };
 
 /// 当前栈变量以栈底指针形式存储，实现为perCPU的私有数据。
@@ -61,3 +62,6 @@ pub(crate) fn set_current_task(task: &'static TaskVirtImpl) {
 
 /// 当前进程的调度器，实现为非perCPU的私有数据
 pub(crate) static USER_SCHEDULER: LazyInit<Scheduler> = LazyInit::new();
+
+/// 当前进程的栈池，实现为非perCPU的私有数据。
+pub(crate) static STACK_HANDLER: LazyInit<SpinMutex<StackHandler>> = LazyInit::new();
