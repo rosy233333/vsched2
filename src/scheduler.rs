@@ -3,8 +3,14 @@
 use heapless::Vec;
 use spin::{mutex::SpinMutex, rwlock::RwLock};
 
-use crate::interface::{EventSorceVtable, EVENT_SORCE_NUM, PROCESS_NUM};
-use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize};
+use crate::{
+    current,
+    interface::{EventSorceVtable, SMPVirtImpl, TaskVirtImpl, EVENT_SORCE_NUM, PROCESS_NUM, SMP},
+};
+use core::{
+    isize, ptr,
+    sync::atomic::{AtomicBool, AtomicIsize, AtomicPtr, AtomicUsize, Ordering},
+};
 
 /// 调度器数据结构
 ///
@@ -16,8 +22,6 @@ pub(crate) struct Scheduler {
     ///
     /// 也就是要求事件源自身实现内部可变性和与之适配的同步机制。
     sources: RwLock<Vec<(*const (), EventSorceVtable), EVENT_SORCE_NUM>>,
-    /// 当前事件源数量
-    source_num: AtomicUsize,
     /// 全局进程表中的索引，同时作为进程号使用
     ///
     /// 内核调度器固定为0
@@ -26,6 +30,102 @@ pub(crate) struct Scheduler {
 
 unsafe impl Send for Scheduler {}
 unsafe impl Sync for Scheduler {}
+
+impl Scheduler {
+    /// 注册事件源
+    ///
+    /// index参数为事件源的插入位置，在获取到的最高优先级相同时，优先选择位置靠前的事件源。
+    ///
+    /// index为0或正数时在index位置插入事件源，index为负数时在倒数第index位置插入事件源。插入成功则返回true。
+    ///
+    /// 若index>len或index<-len-1（len为当前事件源数量），则插入失败，返回false。
+    fn register_event_source(
+        &self,
+        event_source: *const (),
+        vtable: EventSorceVtable,
+        index: isize,
+    ) -> bool {
+        let mut sources = self.sources.write();
+        let len = sources.len() as isize;
+        if index > len || index < -len - 1 {
+            return false;
+        }
+        let insert_index = if index >= 0 {
+            index as usize
+        } else {
+            (len + index) as usize
+        };
+        sources.insert(insert_index, (event_source, vtable)).is_ok()
+    }
+
+    /// 取消注册事件源，返回是否成功取消
+    fn unregister_event_source(&self, event_source: *const ()) -> bool {
+        let mut sources = self.sources.write();
+        if let Some(index) = sources.iter().position(|(ptr, _)| *ptr == event_source) {
+            sources.remove(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 返回该调度器中所有事件源中所有就绪任务的最高优先级。优先级数值越低，优先级越高。
+    ///
+    /// 若没有事件源，返回`isize::MAX`；若有事件源但没有就绪任务，返回比最低优先级更低一级的优先级。
+    pub(crate) fn hightest_priority(&self) -> isize {
+        let sources = self.sources.read();
+        sources
+            .iter()
+            .map(|(ptr, vtable)| (vtable.hightest_priority)(*ptr))
+            .fold(isize::MAX, |a, b| if a < b { a } else { b })
+    }
+
+    /// 从调度器中取出最高优先级的下一任务
+    ///
+    /// 返回值：
+    ///
+    /// - 就绪任务的指针，指向外部定义，实现`Task` trait的类型，若没有就绪任务则返回空指针；
+    /// - 取出就绪任务后事件源中就绪任务的最高优先级。
+    ///     - 若没有事件源，则返回`isize::MAX`；
+    ///     - 若有事件源但没有就绪任务，返回比最低优先级更低一级的优先级。
+    pub(crate) fn take_task(&self) -> (Option<&TaskVirtImpl>, isize) {
+        let sources = self.sources.read();
+        let ((first_index, first_prio), (_second_index, second_prio)) = sources
+            .iter()
+            .map(|(ptr, vtable)| (vtable.hightest_priority)(*ptr))
+            .enumerate()
+            .fold(
+                ((usize::MAX, isize::MAX), (usize::MAX, isize::MAX)),
+                |(first, second), current| {
+                    if current.1 < first.1 {
+                        (current, first)
+                    } else if current.1 < second.1 {
+                        (first, current)
+                    } else {
+                        (first, second)
+                    }
+                },
+            );
+
+        if first_index == usize::MAX {
+            return (None, isize::MAX);
+        }
+
+        let cpu_id = SMPVirtImpl::cpu_id();
+        let (task, new_prio) = (sources[first_index].1.take_task)(sources[first_index].0, cpu_id);
+        if task.is_null() {
+            assert!(new_prio == first_prio);
+            (None, new_prio)
+        } else {
+            let prio = if new_prio < second_prio {
+                new_prio
+            } else {
+                second_prio
+            };
+            (Some(unsafe { TaskVirtImpl::from_ptr(task) }), prio)
+        }
+    }
+}
 
 /// 以进程号为索引的数组，存储每个进程的信息
 pub(crate) struct ProcessInfoTable {
@@ -50,7 +150,7 @@ pub(crate) struct ProcessInfo {
     /// 有效位，用于表示全局进程表中的该索引是否被占用
     valid: AtomicBool,
     /// 进程最高优先级，跨地址空间和特权级共享
-    highest_prio: AtomicUsize,
+    highest_prio: AtomicIsize,
     /// 进程的地址空间
     ///
     /// AtomicPtr指向的内容（`*mut ()`）为存储在内核空间的页表根节点，
@@ -60,15 +160,43 @@ pub(crate) struct ProcessInfo {
 
 impl Default for ProcessInfoTable {
     fn default() -> Self {
-        Self {
+        let mut default = Self {
             table: [const {
                 ProcessInfo {
                     valid: AtomicBool::new(false),
-                    highest_prio: AtomicUsize::new(0),
+                    highest_prio: AtomicIsize::new(isize::MAX),
                     vspace: AtomicPtr::new(core::ptr::null_mut()),
                 }
             }; PROCESS_NUM],
-            next_index: AtomicUsize::new(0),
+            next_index: AtomicUsize::new(1),
+        };
+        default.table[0]
+            .valid
+            .store(true, core::sync::atomic::Ordering::Release);
+        default
+    }
+}
+
+impl ProcessInfoTable {
+    /// 分配一个新的进程号，并返回对应的索引
+    ///
+    /// 若分配成功，则返回Some(索引)；若分配失败（即表中没有空位），则返回None。
+    pub fn register_process(&self) -> Option<usize> {
+        let start_index = self.next_index.fetch_add(1, Ordering::AcqRel) % PROCESS_NUM;
+        let mut index = start_index;
+        loop {
+            if !self.table[index].valid.swap(true, Ordering::AcqRel) {
+                return Some(index);
+            }
+            index = (index + 1) % PROCESS_NUM;
+            if index == start_index {
+                return None;
+            }
         }
+    }
+
+    /// 注销一个进程号，返回是否成功注销
+    pub fn unregister_process(&self, index: usize) -> bool {
+        self.table[index].valid.swap(false, Ordering::AcqRel)
     }
 }
