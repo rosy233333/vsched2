@@ -25,9 +25,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.11.0"
+version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
+checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
 name = "byteorder"
@@ -117,7 +117,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dda9891ec368fda90e4b2cc36592b4881073e25a339fe7e3eddd811f0cf6bf18"
 dependencies = [
  "aarch64-cpu",
- "bitflags 2.11.0",
+ "bitflags 2.11.1",
  "memory_addr",
  "x86_64",
 ]
@@ -235,7 +235,7 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 [[package]]
 name = "vdso_helper"
 version = "0.1.0"
-source = "git+https://github.com/rosy233333/vdso_crate_template.git#285512cf8cd1d256d98e80b21740cdd3b5d4bd59"
+source = "git+https://github.com/rosy233333/vdso_crate_template.git#6bba5327216f54b47110a75b4e598df0bea60234"
 dependencies = [
  "lazyinit",
  "paste",
@@ -261,8 +261,7 @@ dependencies = [
 [[package]]
 name = "vsched_hal"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2b4383b05f5161712f03988daf29592ff11499cf63bbe5b27ceea58030e9be6"
+source = "git+https://github.com/rosy233333/vsched_hal.git#dee679657967967bc21fddda48df643aac1baae1"
 dependencies = [
  "aarch64-cpu",
  "cfg-if",
@@ -293,7 +292,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7841fa0098ceb15c567d93d3fae292c49e10a7662b4936d5f6a9728594555ba"
 dependencies = [
  "bit_field",
- "bitflags 2.11.0",
+ "bitflags 2.11.1",
  "const_fn",
  "rustversion",
  "volatile",

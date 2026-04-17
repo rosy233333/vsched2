@@ -4,11 +4,12 @@
 //!
 //! 几个函数的运行顺序：`trap_entry` -> `run_task`，`schedule` -> `run_task`，之后在`schedule`和`run_task`中循环，使用`jmp`相互跳转实现循环
 
+use core::task::Poll;
+
 use crate::{
-    current::get_current_task,
-    interface::{SMPVirtImpl, Task, TaskState, SMP},
-    reset_stack_and_jump,
-    stack::*,
+    current::{get_current_task, STACK_HANDLER},
+    interface::{Context, SMPVirtImpl, Task, TaskState, SMP},
+    reset_stack_and_jump, set_sp,
 };
 use vdso_helper::get_vvar_data;
 
@@ -122,17 +123,43 @@ pub extern "C" fn utok_schedule() -> usize {
 ///
 /// - `stack_status`: 代表栈的状态，0为空栈，1为非空栈。
 #[no_mangle]
-pub extern "C" fn run_task(stack_status: usize) {
-    let next_task = get_current_task();
-    next_task.set_state(TaskState::Running);
-    if next_task.is_coroutine() {
+pub extern "C" fn run_task() {
+    let in_kernel = {
+        // 该代码块为除跳转以外的函数主要逻辑
+        get_current_task().save_thread_context();
+        get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].load(core::sync::atomic::Ordering::Acquire)
+    };
+    if get_current_task().is_coroutine() {
         // 切换或回收栈
-        // 恢复上下文
-        todo!()
+        let new_sp = {
+            let mut stack_handler = if in_kernel {
+                STACK_HANDLER.lock()
+            } else {
+                get_vvar_data!(KERNEL_STACKS).lock()
+            };
+            stack_handler.get_empty_stack()
+        };
+        unsafe {
+            core::arch::asm!("call coroutine_trampoline", in("a0") new_sp, options(noreturn));
+        }
     } else {
-        // 切换或回收栈
-        // 恢复上下文
-        todo!()
+        let thread_stack = {
+            // todo：使用获取线程栈的接口
+            // todo：修改get_thread_stack，参数如果不使用stackWrapper，则需要更换设计，再议
+            0 as usize
+        };
+        {
+            let mut stack_handler = if in_kernel {
+                STACK_HANDLER.lock()
+            } else {
+                get_vvar_data!(KERNEL_STACKS).lock()
+            };
+            stack_handler.get_thread_stack(thread_stack)
+        };
+        let new_sp = thread_stack;
+        unsafe {
+            core::arch::asm!("call thread_trampoline", in("a0") new_sp, options(noreturn));
+        }
     }
 }
 
@@ -144,6 +171,60 @@ pub extern "C" fn run_task(stack_status: usize) {
 ///
 /// - `stack_status`: 代表栈的状态，0为空栈，1为非空栈。
 #[no_mangle]
-pub extern "C" fn krun_utask(stack_status: usize) -> ! {
-    todo!()
+pub extern "C" fn krun_utask() {
+    if get_current_task().is_coroutine() {
+        let user_sp = {
+            let mut stack_handler = STACK_HANDLER.lock();
+            stack_handler.get_empty_stack()
+        };
+        // todo: 增加内核栈的判断与回收
+        unsafe {
+            core::arch::asm!("call coroutine_into_user_trampoline", in("a0") user_sp, options(noreturn));
+        }
+    }
+}
+
+// 下面的两个函数我认为也属于调度循环的部分，也放在这里了。
+// 跳板代码涉及到寄存器切换，不应该属于这里。
+
+/// 运行协程
+#[no_mangle]
+unsafe extern "C" fn run_coroutine() {
+    get_current_task().set_state(TaskState::Running);
+    let res = get_current_task().poll();
+    // ************** 协程主动让权的入口 **************
+    match res {
+        Poll::Ready(val) => {
+            // todo：val怎么处理？task里是否需要一个设置返回值的接口？
+            get_current_task().set_state(TaskState::Exited);
+        }
+        Poll::Pending => {
+            //TODO：这里也有可能是 Ready 状态，需要后续实现中再修改
+            get_current_task().set_state(TaskState::Blocked);
+        }
+    }
+    let in_kernel = {
+        get_current_task().save_thread_context();
+        get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].load(core::sync::atomic::Ordering::Acquire)
+    };
+    if in_kernel {
+        reset_stack_and_jump!(kschedule);
+    } else {
+        reset_stack_and_jump!(uschedule);
+    }
+}
+
+/// 运行线程
+#[no_mangle]
+unsafe extern "C" fn run_thread() -> ! {
+    get_current_task().set_state(TaskState::Running);
+    get_current_task().restore_context();
+    unreachable!();
+}
+
+/// 从内核态运行用户态的协程
+#[no_mangle]
+unsafe extern "C" fn run_coroutine_into_user() -> ! {
+    // into_user
+    unreachable!();
 }
