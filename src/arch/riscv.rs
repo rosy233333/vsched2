@@ -60,6 +60,7 @@ macro_rules! get_sp {
         }
     };
 }
+
 global_asm!(
     r#"
     .globl raw_trap_entry, raw_thread_entry, raw_run_task, raw_kschedule
@@ -173,8 +174,10 @@ global_asm!(
         # `run_task`为`schedule_loop.rs`中的rust函数。
         # 仅在运行协程时，会从该函数返回。
         # 参数：
-        # - a0: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
-        mv a0, s2
+        # - a0: 代表当前特权级，1为用户态，0为内核态。
+        # - a1: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+        mv a0, s1
+        mv a1, s2
         call run_task
         li a1, 0
         beq s1, a1, raw_kschedule

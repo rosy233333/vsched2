@@ -64,7 +64,6 @@ pub extern "C" fn thread_entry() -> usize {
     // } else {
     //     reset_stack_and_jump!(uschedule);
     // }
-    get_current_task().save_thread_context();
     get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].load(core::sync::atomic::Ordering::Acquire)
         as usize
 }
@@ -121,14 +120,13 @@ pub extern "C" fn utok_schedule() -> usize {
 ///
 /// 参数：
 ///
+/// - privilege: 特权级
+///     - 0: 内核态
+///     - 1: 用户态
 /// - `stack_status`: 代表栈的状态，0为空栈，1为非空栈。
 #[no_mangle]
-pub extern "C" fn run_task() {
-    let in_kernel = {
-        // 该代码块为除跳转以外的函数主要逻辑
-        get_current_task().save_thread_context();
-        get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].load(core::sync::atomic::Ordering::Acquire)
-    };
+pub extern "C" fn run_task(privilege: usize, stack_status: usize) {
+    let in_kernel = privilege == 0;
     if get_current_task().is_coroutine() {
         // 切换或回收栈
         let new_sp = {
@@ -171,7 +169,7 @@ pub extern "C" fn run_task() {
 ///
 /// - `stack_status`: 代表栈的状态，0为空栈，1为非空栈。
 #[no_mangle]
-pub extern "C" fn krun_utask() {
+pub extern "C" fn krun_utask(stack_status: usize) {
     if get_current_task().is_coroutine() {
         let user_sp = {
             let mut stack_handler = STACK_HANDLER.lock();
