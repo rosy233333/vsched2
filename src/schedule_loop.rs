@@ -64,8 +64,13 @@ pub extern "C" fn thread_entry() -> usize {
     // } else {
     //     reset_stack_and_jump!(uschedule);
     // }
-    get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].load(core::sync::atomic::Ordering::Acquire)
-        as usize
+    let in_kernel = get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()]
+        .load(core::sync::atomic::Ordering::Acquire);
+    if in_kernel {
+        0
+    } else {
+        1
+    }
 }
 
 /// 同步trap处理函数
@@ -124,8 +129,14 @@ pub extern "C" fn utok_schedule() -> usize {
 ///     - 0: 内核态
 ///     - 1: 用户态
 /// - `stack_status`: 代表栈的状态，0为空栈，1为非空栈。
+///
+/// 返回值（从`run_coroutine`中返回）：
+///
+/// - 特权级
+///     - 0: 内核态
+///     - 1: 用户态
 #[no_mangle]
-pub extern "C" fn run_task(privilege: usize, stack_status: usize) {
+pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
     let in_kernel = privilege == 0;
     if get_current_task().is_coroutine() {
         // 切换或回收栈
@@ -159,6 +170,7 @@ pub extern "C" fn run_task(privilege: usize, stack_status: usize) {
             core::arch::asm!("call thread_trampoline", in("a0") new_sp, options(noreturn));
         }
     }
+    unreachable!();
 }
 
 /// 在内核态运行用户态任务
@@ -186,8 +198,14 @@ pub extern "C" fn krun_utask(stack_status: usize) {
 // 跳板代码涉及到寄存器切换，不应该属于这里。
 
 /// 运行协程
+///
+/// 返回值：
+///
+/// - 特权级
+///     - 0: 内核态
+///     - 1: 用户态
 #[no_mangle]
-unsafe extern "C" fn run_coroutine() {
+unsafe extern "C" fn run_coroutine() -> usize {
     get_current_task().set_state(TaskState::Running);
     let res = get_current_task().poll();
     // ************** 协程主动让权的入口 **************
@@ -206,9 +224,9 @@ unsafe extern "C" fn run_coroutine() {
         get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].load(core::sync::atomic::Ordering::Acquire)
     };
     if in_kernel {
-        reset_stack_and_jump!(kschedule);
+        0
     } else {
-        reset_stack_and_jump!(uschedule);
+        1
     }
 }
 

@@ -68,6 +68,7 @@ global_asm!(
     # 调度循环中使用的寄存器（均为callee-saved）及其含义：
     # - s1: 代表当前特权级，1为用户态，0为内核态。
     # - s2: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+    # 因为运行过程中可能换栈，因此不能用栈存储局部变量。
     schedule_loop:
 
     # `raw_trap_entry`为os发生trap、保存上下文并进行一定的解析后进入的入口。
@@ -170,15 +171,25 @@ global_asm!(
 
     # `raw_run_task`为从内核态调度器返回用户态调度器时返回的pc。
     # 返回时，需要设置正确的s1和s2。
+    #
+    # 从`run_task`中返回后，需要重新设置s1和s2寄存器，因为`run_task`使用跳板切换了栈，再从另一个函数返回。
+    # 此时，被调用者不再能可靠地保存s1和s2。
+    # `uschedule`和`krun_utask`也涉及跳板换栈，但它们在换栈后一定不会返回，因此不需重新设置s1和s2。
     raw_run_task:
         # `run_task`为`schedule_loop.rs`中的rust函数。
         # 仅在运行协程时，会从该函数返回。
         # 参数：
         # - a0: 代表当前特权级，1为用户态，0为内核态。
         # - a1: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+        # 返回值：
+        # - a0: 特权级
+        #     - 0: 内核态
+        #     - 1: 用户态
         mv a0, s1
         mv a1, s2
         call run_task
+        mv s1, a0
+        li s2, 0
         li a1, 0
         beq s1, a1, raw_kschedule
         li a1, 1
