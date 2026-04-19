@@ -8,8 +8,7 @@ use core::task::Poll;
 
 use crate::{
     current::{get_current_task, STACK_HANDLER},
-    interface::{Context, SMPVirtImpl, Task, TaskState, SMP},
-    reset_stack_and_jump, set_sp,
+    interface::{Context, ContextVirtImpl, SMPVirtImpl, Task, TaskState, TaskVirtImpl, SMP},
 };
 use vdso_helper::get_vvar_data;
 
@@ -124,39 +123,53 @@ pub extern "C" fn utok_schedule() -> usize {
 ///     - 0: 内核态
 ///     - 1: 用户态
 /// - `stack_status`: 代表栈的状态，0为空栈，1为非空栈。
+///
+/// 函数调用过程：
+/// ```
+/// raw_run_task
+///     call run_task
+///         ↓ 保存 ra（= li a1, 0）
+///         coroutine_trampoline
+///             mv sp, new_sp
+///             mv ra, ret_addr
+///             j run_coroutine
+///                 ↓
+///                 run_coroutine_inner()
+///                 ↓
+///                 asm!("ret")
+/// → raw_run_task (li a1, 0)
+/// ```
 #[no_mangle]
 pub extern "C" fn run_task(privilege: usize, stack_status: usize) {
-    let in_kernel = privilege == 0;
+    let ret_addr: usize;
+    unsafe {
+        core::arch::asm!("mv {}, ra", out(reg) ret_addr);
+    }
     if get_current_task().is_coroutine() {
         // 切换或回收栈
         let new_sp = {
-            let mut stack_handler = if in_kernel {
+            let mut stack_handler = if privilege == 0 {
                 STACK_HANDLER.lock()
             } else {
                 get_vvar_data!(KERNEL_STACKS).lock()
             };
-            stack_handler.get_empty_stack()
+            stack_handler.get_empty_stack(stack_status)
         };
         unsafe {
-            core::arch::asm!("call coroutine_trampoline", in("a0") new_sp, options(noreturn));
+            core::arch::asm!("call coroutine_trampoline", in("a0") new_sp, in("a1") ret_addr, options(noreturn));
         }
     } else {
-        let thread_stack = {
-            // todo：使用获取线程栈的接口
-            // todo：修改get_thread_stack，参数如果不使用stackWrapper，则需要更换设计，再议
-            0 as usize
-        };
+        let thread_stack = { get_current_task().thread_stack_base() };
         {
-            let mut stack_handler = if in_kernel {
+            let mut stack_handler = if privilege == 0 {
                 STACK_HANDLER.lock()
             } else {
                 get_vvar_data!(KERNEL_STACKS).lock()
             };
-            stack_handler.get_thread_stack(thread_stack)
+            stack_handler.get_thread_stack(Some(thread_stack.into()), stack_status);
         };
-        let new_sp = thread_stack;
         unsafe {
-            core::arch::asm!("call thread_trampoline", in("a0") new_sp, options(noreturn));
+            core::arch::asm!("call thread_trampoline", in("a0") thread_stack, in("a1") ret_addr, options(noreturn));
         }
     }
 }
@@ -173,11 +186,28 @@ pub extern "C" fn krun_utask(stack_status: usize) {
     if get_current_task().is_coroutine() {
         let user_sp = {
             let mut stack_handler = STACK_HANDLER.lock();
-            stack_handler.get_empty_stack()
+            stack_handler.get_empty_stack(stack_status)
         };
-        // todo: 增加内核栈的判断与回收
+        {
+            get_vvar_data!(KERNEL_STACKS)
+                .lock()
+                .get_thread_stack(None, stack_status);
+        }
         unsafe {
-            core::arch::asm!("call coroutine_into_user_trampoline", in("a0") user_sp, options(noreturn));
+            // 这里实际上没有发生换栈，换栈发生在into_user和into_user_context中，因此不需要跳板
+            // core::arch::asm!("call coroutine_into_user_trampoline", in("a0") user_sp, options(noreturn));
+            run_coroutine_into_user(user_sp);
+        }
+    } else {
+        {
+            get_vvar_data!(KERNEL_STACKS)
+                .lock()
+                .get_thread_stack(None, stack_status);
+        }
+        get_current_task().set_state(TaskState::Running);
+        unsafe {
+            // core::arch::asm!("call coroutine_into_user_trampoline", in("a0") user_sp, options(noreturn));
+            run_thread_into_user();
         }
     }
 }
@@ -197,18 +227,12 @@ unsafe extern "C" fn run_coroutine() {
             get_current_task().set_state(TaskState::Exited);
         }
         Poll::Pending => {
-            //TODO：这里也有可能是 Ready 状态，需要后续实现中再修改
+            // todo：这里也有可能是 Ready 状态，需要后续实现中再修改
             get_current_task().set_state(TaskState::Blocked);
         }
     }
-    let in_kernel = {
-        get_current_task().save_thread_context();
-        get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].load(core::sync::atomic::Ordering::Acquire)
-    };
-    if in_kernel {
-        reset_stack_and_jump!(kschedule);
-    } else {
-        reset_stack_and_jump!(uschedule);
+    unsafe {
+        core::arch::asm!("ret", options(noreturn));
     }
 }
 
@@ -222,7 +246,15 @@ unsafe extern "C" fn run_thread() -> ! {
 
 /// 从内核态运行用户态的协程
 #[no_mangle]
-unsafe extern "C" fn run_coroutine_into_user() -> ! {
-    // into_user
+unsafe extern "C" fn run_coroutine_into_user(user_sp: usize) -> ! {
+    // todo：把user_sp传入into_user里
+    ContextVirtImpl::into_user();
+    unreachable!();
+}
+
+/// 从内核态运行用户态的线程
+#[no_mangle]
+unsafe extern "C" fn run_thread_into_user() -> ! {
+    ContextVirtImpl::into_user_context(get_current_task() as *const TaskVirtImpl as *const ());
     unreachable!();
 }

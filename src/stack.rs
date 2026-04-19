@@ -3,7 +3,9 @@ use core::task::Poll;
 use crate::{
     current::get_current_task,
     get_sp,
-    interface::{CPU_NUM, SMP, SMPVirtImpl, STACK_POOL_SIZE, Stack, StackVirtImpl, Task, TaskState},
+    interface::{
+        SMPVirtImpl, Stack, StackVirtImpl, Task, TaskState, CPU_NUM, SMP, STACK_POOL_SIZE,
+    },
     set_sp,
 };
 use heapless::vec::Vec;
@@ -15,6 +17,7 @@ use vdso_helper::get_vvar_data;
 ///
 /// TODO: 这里需要后续修改，用sp或fp判断栈类型不对（由于函数调用和局部变量，一定不等于栈顶）
 #[inline(always)]
+#[allow(dead_code)] // 之后再看要不要删掉
 fn get_stack_type(stack_base: usize) -> usize {
     get_sp!() - stack_base
 }
@@ -22,20 +25,21 @@ fn get_stack_type(stack_base: usize) -> usize {
 #[no_mangle]
 #[unsafe(naked)]
 unsafe extern "C" fn coroutine_trampoline() -> ! {
-    core::arch::naked_asm!("mv sp, a0", "j run_coroutine",);
+    core::arch::naked_asm!("mv sp, a0", "mv ra, a1", "j run_coroutine",);
 }
 
 #[no_mangle]
 #[unsafe(naked)]
 unsafe extern "C" fn thread_trampoline() -> ! {
-    core::arch::naked_asm!("mv sp, a0", "j run_thread",);
+    core::arch::naked_asm!("mv sp, a0", "mv ra, a1", "j run_thread",);
 }
 
-#[no_mangle]
-#[unsafe(naked)]
-unsafe extern "C" fn coroutine_into_user_trampoline() -> ! {
-    core::arch::naked_asm!("mv sp, a0", "j run_coroutine_into_user",);
-}
+// #[no_mangle]
+// #[unsafe(naked)]
+// unsafe extern "C" fn coroutine_into_user_trampoline() -> ! {
+//     core::arch::naked_asm!("mv sp, a0", "j run_coroutine_into_user",);
+// }
+
 /// 对栈进行封装
 ///
 /// 用来储存栈基址，后续可以加入新的内容。通过调用 alloc 和 dealloc 接口进行栈的分配和回收
@@ -56,14 +60,17 @@ impl StackWapper {
     /// 分配一个新的栈
     pub fn new() -> Self {
         let base = StackVirtImpl::alloc() as usize;
-        Self {
-            base,
-        }
+        Self { base }
     }
 
     /// 从一个已有的栈中获取一个新实例
     pub fn from_raw(base: usize) -> Self {
         Self { base }
+    }
+
+    /// 回收栈
+    pub fn dealloc(self) {
+        StackVirtImpl::dealloc(self.base as *mut ());
     }
 }
 
@@ -116,23 +123,34 @@ impl StackHandler {
     }
 
     pub fn alloc_stack(&mut self) -> StackWapper {
-        self.free_stacks.pop().expect("no free stack left")
+        self.free_stacks.pop().unwrap_or_else(|| {
+            // 如果没有空栈，则分配一个新的栈
+            StackWapper::new()
+        })
     }
 
     pub fn dealloc_stack(&mut self, stack: StackWapper) {
-        self.free_stacks.push(stack);
+        self.free_stacks.push(stack).unwrap_or_else(|stack| {
+            // 如果栈池已满，则回收栈
+            stack.dealloc();
+        });
     }
 
     pub fn set_current_stack(&mut self, stack: StackWapper, cpu_id: usize) -> StackWapper {
-        self.current_stack[cpu_id].replace(stack).unwrap()
+        self.current_stack[cpu_id]
+            .replace(stack)
+            .expect("Error: Failed to set current stack")
     }
 
     /// 切换到空栈
     ///
     /// 对应黄色框部分
-    pub fn get_empty_stack(&mut self) -> usize {
+    ///
+    /// 参数：
+    /// - `stack_status`: 代表当前栈的状态，0为空栈，1为非空栈。
+    pub fn get_empty_stack(&mut self, stack_type: usize) -> usize {
         let cpu_id = SMPVirtImpl::cpu_id();
-        if get_stack_type(self.current_stack[cpu_id].as_ref().unwrap().base) != 0 {
+        if stack_type != 0 {
             let empty_stack = self.alloc_stack();
             let old_stack = self.set_current_stack(empty_stack, cpu_id);
             self.dealloc_stack(old_stack);
@@ -144,20 +162,19 @@ impl StackHandler {
     ///
     /// 对应蓝色框部分
     ///
-    /// TODO: 在`StackWapper`使用`manually_drop`后需要修改这里的实现
-    pub fn get_thread_stack(&mut self, thread_stack: StackWapper) -> usize {
-        let thread_stack_ptr = thread_stack.base;
-        let old_stack = self.set_current_stack(thread_stack, SMPVirtImpl::cpu_id());
-        if get_stack_type(old_stack.base) == 0 {
+    /// 参数：
+    /// - `thread_stack`: 代表线程栈，如果为 None，则不设置当前栈，否则将当前栈设置为 thread_stack。
+    /// - `stack_status`: 代表当前栈的状态，0为空栈，1为非空栈。
+    pub fn get_thread_stack(&mut self, thread_stack: Option<StackWapper>, stack_type: usize) {
+        let old_stack = {
+            if let Some(stack) = thread_stack {
+                self.set_current_stack(stack, SMPVirtImpl::cpu_id())
+            } else {
+                self.current_stack[SMPVirtImpl::cpu_id()].take().unwrap()
+            }
+        };
+        if stack_type == 0 {
             self.dealloc_stack(old_stack);
-        }
-        thread_stack_ptr
-    }
-
-    pub fn try_alloc_stack(&mut self) {
-        let cpu_id = SMPVirtImpl::cpu_id();
-        if get_stack_type(self.current_stack[cpu_id].as_ref().unwrap().base) == 0 {
-            
         }
     }
 }
