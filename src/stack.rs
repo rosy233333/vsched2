@@ -6,7 +6,7 @@ use crate::{
     interface::{
         SMPVirtImpl, Stack, StackVirtImpl, Task, TaskState, CPU_NUM, SMP, STACK_POOL_SIZE,
     },
-    set_sp,
+    set_sp, switch_sp_tratrampoline,
 };
 use heapless::vec::Vec;
 use vdso_helper::get_vvar_data;
@@ -25,21 +25,20 @@ fn get_stack_type(stack_base: usize) -> usize {
 #[no_mangle]
 #[unsafe(naked)]
 unsafe extern "C" fn coroutine_trampoline() -> ! {
-    core::arch::naked_asm!("mv sp, a0", "mv ra, a1", "j run_coroutine",);
+    switch_sp_tratrampoline!(run_coroutine)
 }
 
 #[no_mangle]
 #[unsafe(naked)]
 unsafe extern "C" fn thread_trampoline() -> ! {
-    core::arch::naked_asm!("mv sp, a0", "mv ra, a1", "j run_thread",);
+    switch_sp_tratrampoline!(run_thread)
 }
 
 // #[no_mangle]
 // #[unsafe(naked)]
 // unsafe extern "C" fn coroutine_into_user_trampoline() -> ! {
-//     core::arch::naked_asm!("mv sp, a0", "j run_coroutine_into_user",);
+//     switch_sp_tratrampoline!(run_coroutine_into_user)
 // }
-
 /// 对栈进行封装
 ///
 /// 用来储存栈基址，后续可以加入新的内容。通过调用 alloc 和 dealloc 接口进行栈的分配和回收
