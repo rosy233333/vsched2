@@ -22,6 +22,8 @@ trait_interface! {
         fn restore_context(&self);
         /// 恢复协程上下文，函数返回时自动保存了协程上下文
         fn poll(&self) -> Poll<usize>;
+        /// 获取线程上下文保存的栈底指针
+        fn thread_stack_base(&self) -> usize;
     }
 }
 
