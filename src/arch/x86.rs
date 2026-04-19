@@ -28,7 +28,7 @@
 
 use core::arch::global_asm;
 
-/// 全局宏定义
+/// 全局宏定义，用于兼容32位和64位的差异
 global_asm!(
     #[cfg(target_arch = "x86_32")]
     r#"
@@ -95,13 +95,13 @@ macro_rules! switch_sp_tratrampoline {
 /// 详见`switch_sp_trampoline`的注释。
 #[macro_export]
 macro_rules! jump_to_trampoline {
-    ($target_fn:ident, $new_sp:ident) => {
-        unsafe{
+    ($trampoline_fn:ident, $new_sp:ident) => {
+        unsafe {
             // di: 新的sp；si: 返回地址（无论32位或64位）
             core::arch::asm!(r#"
                 movx si, XLEN(bp)
                 jmp {}
-            "#, in("di") $new_sp, sym concat!($target_fn, "_trampoline"))
+            "#, sym $trampoline_fn, in("di") $new_sp, options(noreturn))
         }
     };
 }

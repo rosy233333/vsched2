@@ -9,6 +9,7 @@ use core::task::Poll;
 use crate::{
     current::{get_current_task, STACK_HANDLER},
     interface::{Context, ContextVirtImpl, SMPVirtImpl, Task, TaskState, TaskVirtImpl, SMP},
+    jump_to_trampoline,
 };
 use vdso_helper::get_vvar_data;
 
@@ -128,7 +129,7 @@ pub extern "C" fn utok_schedule() -> usize {
 ///     - 0: 内核态
 ///     - 1: 用户态
 /// - `stack_status`: 代表栈的状态，0为空栈，1为非空栈。
-/// 
+///
 /// 返回值（从`run_coroutine`中返回）：
 ///
 /// - 特权级
@@ -153,10 +154,10 @@ pub extern "C" fn utok_schedule() -> usize {
 #[no_mangle]
 pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
     let in_kernel = privilege == 0;
-    let ret_addr: usize;
-    unsafe {
-        core::arch::asm!("mv {}, ra", out(reg) ret_addr);
-    }
+    // let ret_addr: usize;
+    // unsafe {
+    //     core::arch::asm!("mv {}, ra", out(reg) ret_addr);
+    // }
     if get_current_task().is_coroutine() {
         // 切换或回收栈
         let new_sp = {
@@ -167,9 +168,10 @@ pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
             };
             stack_handler.get_empty_stack(stack_status)
         };
-        unsafe {
-            core::arch::asm!("call coroutine_trampoline", in("a0") new_sp, in("a1") ret_addr, options(noreturn));
-        }
+        // unsafe {
+        //     core::arch::asm!("call coroutine_trampoline", in("a0") new_sp, in("a1") ret_addr, options(noreturn));
+        // }
+        jump_to_trampoline!(coroutine_trampoline, new_sp);
     } else {
         let thread_stack = { get_current_task().thread_stack_base() };
         {
@@ -180,9 +182,10 @@ pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
             };
             stack_handler.get_thread_stack(Some(thread_stack.into()), stack_status);
         };
-        unsafe {
-            core::arch::asm!("call thread_trampoline", in("a0") thread_stack, in("a1") ret_addr, options(noreturn));
-        }
+        // unsafe {
+        //     core::arch::asm!("call thread_trampoline", in("a0") thread_stack, in("a1") ret_addr, options(noreturn));
+        // }
+        jump_to_trampoline!(thread_trampoline, thread_stack);
     }
     unreachable!();
 }

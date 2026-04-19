@@ -25,6 +25,28 @@
 
 use core::arch::global_asm;
 
+/// 全局宏定义，用于兼容32位和64位的差异
+global_asm!(
+    #[cfg(target_arch = "riscv32")]
+    r#"
+    .macro lx
+        lw
+    .endm
+    .macro XLEN
+        4
+    .endm
+    "#,
+    #[cfg(target_arch = "riscv64")]
+    r#"
+    .macro lx
+        ld
+    .endm
+    .macro XLEN
+        8
+    .endm
+    "#,
+);
+
 /// 封装跳转指令以适配不同架构。
 ///
 /// 跳转指令用于实现调度循环中各函数的切换。
@@ -96,7 +118,28 @@ macro_rules! set_sp {
 #[macro_export]
 macro_rules! switch_sp_tratrampoline {
     ($f:ident) => {
-        core::arch::naked_asm!("mv sp, a0", "j {}", sym $f);
+        // a0: 新的sp
+        // ra: 已恢复为上一个函数的ra
+        core::arch::naked_asm!(r#"
+            mv sp, a0
+            j {}
+        "#, sym $f);
+    };
+}
+
+/// 从第一个函数跳转到跳板的汇编代码。
+///
+/// 详见`switch_sp_trampoline`的注释。
+#[macro_export]
+macro_rules! jump_to_trampoline {
+    ($trampoline_fn:ident, $new_sp:ident) => {
+        unsafe {
+            // a0: 新的sp；ra: 返回地址
+            core::arch::asm!(r#"
+                lx ra, -XLEN(fp)
+                j {}
+            "#, sym $trampoline_fn, in("a0") $new_sp, options(noreturn))
+        }
     };
 }
 
