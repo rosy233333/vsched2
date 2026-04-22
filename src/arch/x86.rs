@@ -1,5 +1,9 @@
 //! ## x86汇编简介
 //!
+//! ### 语法
+//!
+//! rust内联汇编使用指定了`.intel_syntax noprefix`的gas语法，在x86中即为intel语法。
+//!
 //! ### 调用约定
 //!
 //! 32位使用cdecl，64位使用sysv64
@@ -15,8 +19,8 @@
 //!
 //! |栈帧内容|备注|
 //! |-|-|
-//! |参数|调用者清理|
-//! |返回地址|该位置以16字节对齐|
+//! |参数|调用者清理，该位置的底端（栈顶侧）以16字节对齐|
+//! |返回地址||
 //! |保存的bp|可选；若启用栈帧指针，则当前bp指向该位置|
 //! |局部变量||
 //! |保存的其它寄存器|当前sp指向该区域的底端（栈顶侧）|
@@ -38,6 +42,44 @@ global_asm!(
     .macro andx
         andl
     .endm
+    .macro addx
+        addl
+    .endm
+    .macro subx
+        subl
+    .endm
+    .macro cmpx
+        cmpl
+    .endm
+    .macro reg0
+        di
+    .endm
+    .macro reg1
+        si
+    .endm
+    # push_x_arg: 函数调用前的设置参数、平衡堆栈
+    .macro push_0_arg
+        subl sp, 12
+    .endm
+    .macro push_1_arg arg0
+        subl sp, 8
+        pushl \arg0
+    .endm
+    .macro push_2_arg arg0, arg1
+        subl sp, 4
+        pushl \arg1
+        pushl \arg0
+    .endm
+    # push_x_arg: 函数调用后的平衡堆栈
+    .macro pop_0_arg
+        addl sp, 12
+    .endm
+    .macro pop_1_arg
+        addl sp, 12
+    .endm
+    .macro pop_2_arg
+        addl sp, 12
+    .endm
     .macro XLEN
         4
     .endm
@@ -49,6 +91,44 @@ global_asm!(
     .endm
     .macro andx
         andq
+    .endm
+    .macro addx
+        addq
+    .endm
+    .macro subx
+        subq
+    .endm
+    .macro cmpx
+        cmpq
+    .endm
+    .macro reg0
+        r12
+    .endm
+    .macro reg1
+        r13
+    .endm
+    # push_x_arg: 函数调用前的设置参数、平衡堆栈
+    .macro push_0_arg
+        subq sp, 8
+    .endm
+    .macro push_1_arg arg0
+        subq sp, 8
+        movq di, \arg0
+    .endm
+    .macro push_2_arg arg0, arg1
+        subq sp, 8
+        movq di, \arg0
+        movq si, \arg1
+    .endm
+    # push_x_arg: 函数调用后的平衡堆栈
+    .macro pop_0_arg
+        addq sp, 8
+    .endm
+    .macro pop_1_arg
+        addq sp, 8
+    .endm
+    .macro pop_2_arg
+        addq sp, 8
     .endm
     .macro XLEN
         8
@@ -80,9 +160,12 @@ global_asm!(
 macro_rules! switch_sp_tratrampoline {
     ($f:ident) => {
         // di: 新的sp；si: 返回地址（无论32位或64位）
-        // 在放入返回地址之前，需要先将新的sp对齐到16字节。
+        // 在call前，sp需要对齐到16字节。也就是说，存放返回地址的位置需要模16余16-XLEN。
+        // 在放入返回地址之前，需要先使新的sp（存放返回地址的位置）满足对齐要求。
         core::arch::naked_asm!(r#"
+            addx di, XLEN
             andx di, -16
+            subx di, XLEN
             movx (di), si
             movx sp, di
             jmp {}
@@ -91,6 +174,8 @@ macro_rules! switch_sp_tratrampoline {
 }
 
 /// 从第一个函数跳转到跳板的汇编代码。
+///
+/// 如果不需换栈，则new_sp为当前栈的栈底。
 ///
 /// 详见`switch_sp_trampoline`的注释。
 #[macro_export]
@@ -105,3 +190,167 @@ macro_rules! jump_to_trampoline {
         }
     };
 }
+
+global_asm!(
+    r#"
+    .globl raw_trap_entry, raw_thread_entry, raw_run_task, raw_kschedule
+
+    # 调度循环中使用的寄存器（均为callee-saved）及其含义：
+    # - reg0（di（32位）/r12（64位））: 代表当前特权级，1为用户态，0为内核态。
+    # - reg1（si（32位）/r13（64位））: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+    # 因为运行过程中可能换栈，因此不能用栈存储局部变量。
+    # 从外部进入`schedule_loop`前，需要对齐sp并使用`call`进入。
+    # `schedule_loop`执行的过程中，除了函数调用前后以外，sp都保持在“pop返回地址后对齐到16字节”的状态。
+    schedule_loop:
+
+    # `raw_trap_entry`为os发生trap、保存上下文并进行一定的解析后进入的入口。
+    # 在x86中，需要用call进入`raw_trap_entry`，以保持sp的对齐。
+    # os传递给调度器的参数：
+    # - ax: trap类型
+    #   - 0: 不是外部中断
+    #   - 1: 外部中断
+    #   - 2: 特殊参数的系统调用，仅用于“从用户态调度器进入内核”的情况。
+    # - bx: 代表当前特权级，1为用户态，0为内核态。
+    raw_trap_entry:
+        movx reg0, bx
+        movx reg1, 0
+        # `trap_entry`为`schedule_loop.rs`中的rust函数。
+        # 参数：
+        # - \#1: trap类型，与os传入的参数格式相同。
+        # - \#2: 代表当前特权级，1为用户态，0为内核态。
+        # 返回值：
+        # - ax: 下一步的跳转目标
+        #   - 0: trap_handle
+        #   - 1: kschedule
+        #   - 2: uschedule
+        #   - 3: utok_schedule
+        push_2_arg ax, bx
+        call trap_entry
+        pop_2_arg
+        cmpx ax, 0
+        je raw_trap_handle
+        cmpx ax, 1
+        je raw_kschedule
+        cmpx ax, 2
+        je raw_uschedule
+        cmpx ax, 3
+        je raw_utok_schedule
+        # 不可达
+        .word 0xdeadbeef
+
+    # `raw_thread_entry`为os进行线程主动让权，保存上下文后进入的入口。
+    raw_thread_entry:
+        movx reg1, 1
+        # `thread_entry`为`schedule_loop.rs`中的rust函数。
+        # 判断当前特权级后返回。
+        # 返回值：
+        # - ax: 当前特权级，决定下一步的跳转目标
+        #   - 0: 内核态，跳转至kschedule
+        #   - 1: 用户态，跳转至uschedule
+        push_0_arg
+        call thread_entry
+        pop_0_arg
+        movx reg0, ax
+        cmpx ax, 0
+        je raw_kschedule
+        cmpx ax, 1
+        je raw_uschedule
+        # 不可达
+        .word 0xdeadbeef
+
+    raw_trap_handle:
+        # `trap_handle`为`schedule_loop.rs`中的rust函数。
+        push_0_arg
+        call trap_handle
+        pop_0_arg
+        jmp raw_run_task
+        # 不可达
+        .word 0xdeadbeef
+
+    # `raw_kschdule`为内核初始化时进入调度器的入口。
+    # 进入时，需设置reg0=0, reg1=0，
+    # 使用`call`进入`raw_kschdule`以对齐堆栈
+    raw_kschedule:
+        # `kschedule`为`schedule_loop.rs`中的rust函数。
+        # 返回值：
+        # - ax: 下一步的跳转目标
+        #   - 0: run_task
+        #   - 1: krun_utask
+        push_0_arg
+        call kschedule
+        pop_0_arg
+        cmpx ax, 0
+        je raw_run_task
+        cmpx ax, 1
+        je raw_krun_utask
+        # 不可达
+        .word 0xdeadbeef
+
+    raw_uschedule:
+        # `uschedule`为`schedule_loop.rs`中的rust函数。
+        # 仅在下一任务在本进程中时，会从该函数返回。
+        # 参数：
+        # - ax: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+        push_1_arg reg1
+        call uschedule
+        pop_1_arg
+        jmp raw_run_task
+        # 不可达
+        .word 0xdeadbeef
+
+    raw_utok_schedule:
+        # `utok_schedule`为`schedule_loop.rs`中的rust函数。
+        # 返回值：
+        # - ax: 下一步的跳转目标
+        #   - 0: run_task
+        #   - 1: krun_utask
+        push_0_arg
+        call utok_schedule
+        pop_0_arg
+        cmpx ax, 0
+        je raw_run_task
+        cmpx ax, 1
+        je raw_krun_utask
+        # 不可达
+        .word 0xdeadbeef
+
+    # `raw_run_task`为从内核态调度器返回用户态调度器时返回的pc。
+    # 从内核返回用户态时，需要设置正确的s1和s2。
+    #
+    # 从`run_task`中返回后，需要重新设置s1和s2寄存器，因为`run_task`使用跳板切换了栈，再从另一个函数返回。
+    # 此时，被调用者不再能可靠地保存s1和s2。
+    # `uschedule`和`krun_utask`也涉及跳板换栈，但它们在换栈后一定不会返回，因此不需重新设置s1和s2。
+    raw_run_task:
+        # `run_task`为`schedule_loop.rs`中的rust函数。
+        # 仅在运行协程时，会从该函数返回。
+        # 参数：
+        # - \#1: 代表当前特权级，1为用户态，0为内核态。
+        # - \#2: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+        # 返回值：
+        # - ax: 特权级
+        #     - 0: 内核态
+        #     - 1: 用户态
+        push_2_arg reg0, reg1
+        call run_task
+        pop_2_arg
+        movx reg0, ax # 通过`run_task`（实际是`run_coroutine`）的返回值设置reg0
+        movx reg1, 0 # 从`run_task`（实际是`run_coroutine`）中返回则一定是协程，因此是空栈
+        cmpx reg0, 0
+        je raw_kschedule
+        cmpx reg0, 1
+        je raw_uschedule
+        # 不可达
+        .word 0xdeadbeef
+
+    raw_krun_utask:
+        # `krun_utask`为`schedule_loop.rs`中的rust函数。
+        # 不会从该函数返回。
+        # 参数：
+        # - \#1: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+        push_1_arg reg1
+        call krun_utask
+        # 不可达
+        .word 0xdeadbeef
+        
+"#
+);

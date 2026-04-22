@@ -129,6 +129,8 @@ macro_rules! switch_sp_tratrampoline {
 
 /// 从第一个函数跳转到跳板的汇编代码。
 ///
+/// 如果不需换栈，则new_sp为当前栈的栈底。
+///
 /// 详见`switch_sp_trampoline`的注释。
 #[macro_export]
 macro_rules! jump_to_trampoline {
