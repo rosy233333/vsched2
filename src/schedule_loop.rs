@@ -7,14 +7,13 @@
 use core::{sync::atomic::Ordering, task::Poll};
 
 use crate::{
-    current::{get_current_task, get_user_data, set_current_task, STACK_HANDLER, USER_SCHEDULER},
+    current::{self, STACK_HANDLER, USER_SCHEDULER, get_current_task, get_user_data, set_current_task},
     interface::{
-        Context, ContextVirtImpl, SMPVirtImpl, Task, TaskState, TaskVirtImpl, VSpace,
-        VSpaceVirtImpl, SMP,
+        Context, ContextVirtImpl, SMP, SMPVirtImpl, Task, TaskState, TaskVirtImpl, TrapHandle, TrapHandleVirtImpl, VSpace, VSpaceVirtImpl
     },
     jump_to_trampoline,
     scheduler::Scheduler,
-    current::{STACK_HANDLER, get_current_task}, interface::{Context, ContextVirtImpl, SMP, SMPVirtImpl, Task, TaskState, TaskVirtImpl}, jump_to_trampoline, set_pre_stack, set_user_pre_stack, stack::{coroutine_trampoline, thread_trampoline}
+    set_pre_stack, set_user_pre_stack, stack::{coroutine_trampoline, thread_trampoline}
 };
 use vdso_helper::{get_vvar_data, vvar_data};
 
@@ -103,7 +102,13 @@ pub extern "C" fn thread_entry() -> usize {
 /// 获取trap处理任务并传入当前上下文，设置trap处理任务为当前上下文，进入`run_task`
 #[no_mangle]
 pub extern "C" fn trap_handle() {
-    todo!()
+    let current_task = get_current_task();
+    let handler_ptr = TrapHandleVirtImpl::get_handler(current_task.to_ptr());
+    assert!(!handler_ptr.is_null(), "Trap Handler should not be null");
+    let handler_task = unsafe { TaskVirtImpl::from_ptr(handler_ptr) };
+    handler_task.set_pid(current_task.pid());
+    handler_task.set_state(TaskState::Running);
+    set_current_task(handler_task);
 }
 
 /// 内核的调度与地址空间、特权级切换函数
@@ -185,7 +190,7 @@ fn push_prev_task(current_scheduler: &Scheduler) {
     let current_task = get_current_task();
     if current_task.state() == TaskState::Ready {
         todo!("实现就绪队列");
-        current_scheduler.ready_queue.push(current_task.to_ptr());
+        // current_scheduler.ready_queue.push(current_task.to_ptr());
     }
 }
 

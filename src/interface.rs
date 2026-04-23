@@ -131,6 +131,7 @@ trait_interface! {
 // }
 
 #[repr(u8)]
+#[derive(PartialEq)]
 pub enum TaskState {
     Ready = 0,
     Running = 1,
