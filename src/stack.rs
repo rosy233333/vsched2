@@ -1,12 +1,10 @@
-use core::task::Poll;
-
 use crate::{
-    current::get_current_task, get_sp, interface::{
-        CPU_NUM, SMP, SMPVirtImpl, STACK_POOL_SIZE, Stack, StackVirtImpl, Task, TaskState
-    }, schedule_loop::{run_coroutine, run_thread}, set_sp, switch_sp_tratrampoline
+    get_sp,
+    interface::{SMPVirtImpl, Stack, StackVirtImpl, CPU_NUM, SMP, STACK_POOL_SIZE},
+    schedule_loop::{run_coroutine, run_thread},
+    switch_sp_tratrampoline,
 };
 use heapless::vec::Vec;
-use vdso_helper::get_vvar_data;
 
 /// 获取栈类型，即是否是空栈
 ///
@@ -47,6 +45,7 @@ pub(crate) unsafe extern "C" fn thread_trampoline() -> ! {
 /// ### TODO
 ///
 /// 考虑使用 manually drop 来解决上述问题
+#[derive(Debug)]
 pub struct StackWapper {
     /// 栈基址
     pub base: usize,
@@ -98,6 +97,7 @@ impl From<StackWapper> for usize {
 /// 用户态的栈池管理器
 ///
 /// 管理栈的分配和回收，提供栈切换的接口
+#[derive(Debug)]
 pub struct StackHandler {
     /// 空栈的集合
     pub free_stacks: Vec<StackWapper, STACK_POOL_SIZE>,
@@ -110,7 +110,7 @@ impl StackHandler {
     pub fn new() -> Self {
         let mut stacks = Vec::new();
         for _ in 0..STACK_POOL_SIZE - CPU_NUM {
-            stacks.push(StackWapper::new());
+            stacks.push(StackWapper::new()).expect("failed to create new stack");
         }
         Self {
             free_stacks: stacks,

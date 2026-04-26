@@ -7,15 +7,15 @@
 use core::{sync::atomic::Ordering, task::Poll};
 
 use crate::{
-    current::{self, STACK_HANDLER, USER_SCHEDULER, get_current_task, get_user_data, set_current_task},
+    current::{STACK_HANDLER, USER_SCHEDULER, get_current_task, get_user_data, set_current_task},
     interface::{
         Context, ContextVirtImpl, SMP, SMPVirtImpl, Task, TaskState, TaskVirtImpl, TrapHandle, TrapHandleVirtImpl, VSpace, VSpaceVirtImpl
     },
     jump_to_trampoline,
     scheduler::Scheduler,
-    set_pre_stack, set_user_pre_stack, stack::{coroutine_trampoline, thread_trampoline}
+    set_pre_stack, stack::{coroutine_trampoline, thread_trampoline}
 };
-use vdso_helper::{get_vvar_data, vvar_data};
+use vdso_helper::get_vvar_data;
 
 /// 同步trap入口
 ///
@@ -328,7 +328,8 @@ pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
 pub extern "C" fn krun_utask(stack_status: usize) {
     if get_current_task().is_coroutine() {
         let user_sp = {
-            let mut stack_handler = STACK_HANDLER.lock();
+            let stack_handler = unsafe { get_user_data(&STACK_HANDLER) };
+            let mut stack_handler = stack_handler.lock();
             stack_handler.get_empty_stack(stack_status)
         };
         {

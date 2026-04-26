@@ -1,4 +1,4 @@
-use core::{ptr, task::Poll};
+use core::task::Poll;
 use vdso_helper::{trait_interface, use_mut_cfg};
 
 use_mut_cfg!();
@@ -110,6 +110,24 @@ trait_interface! {
         ///
         /// 地址空间使用`*mut ()`表示，即为`ProcessInfo`中的`vspace`中的内容。
         fn into_vspace(vspace: *mut ());
+    }
+}
+
+trait_interface! {
+    pub trait UserData {
+        /// 从内核中访问当前地址空间的用户态vDSO私有数据
+        ///
+        /// 因为即使在一个地址空间中，用户态和内核态的vDSO私有数据也是分开的，因此需要借助这个函数进行地址运算，获得用户态对应数据的引用。
+        ///
+        /// - `pos` ：为私有数据对象的地址。
+        /// - `len` ：为对象的字节长度。
+        /// - 返回值：为用户态vDSO私有数据区中对应对象的地址，调用方可以将其转换为对应类型的引用。
+        /// 
+        /// # Safety
+        /// 
+        /// - 外界实现的地址翻译必须保证返回的地址在用户态vDSO私有数据区内，且`[addr, addr + size_of::<T>())`完整可访问。
+        /// - 因为访问的是用户态子空间的数据，因此不能在切换地址空间前后访问该函数返回的同一份引用。
+        fn get_user_data(pos: usize, len: usize) -> *mut ();
     }
 }
 
