@@ -4,13 +4,14 @@
 #![deny(missing_docs)]
 #![feature(naked_functions)]
 
+mod api;
 mod arch;
 #[allow(non_snake_case)]
 mod current;
 #[allow(non_camel_case_types)]
 mod interface;
-mod schedule_loop;
-mod scheduler;
+mod main_loop;
+mod schedule;
 mod stack;
 
 use current::VvarData;

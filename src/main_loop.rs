@@ -15,7 +15,7 @@ use crate::{
         TrapHandleVirtImpl, VSpace, VSpaceVirtImpl, SMP,
     },
     jump_to_trampoline,
-    scheduler::Scheduler,
+    schedule::scheduler::Scheduler,
     set_pre_stack,
     stack::{coroutine_trampoline, thread_trampoline},
 };
@@ -153,7 +153,7 @@ pub extern "C" fn uschedule(stack_status: usize) {
     loop {
         let next_pid = process_schedule(scheduler);
 
-        let res = utask_schedule(next_pid);
+        let res = utask_schedule(next_pid, stack_status);
         if res == 0 {
             break;
         }
@@ -273,7 +273,7 @@ fn ktask_schedule(next_pid: usize) -> usize {
 ///
 /// - 0：接下来调用run_task
 /// - 1：未获取到任务，需要重新获取任务后重新调用utask_schedule。
-fn utask_schedule(next_pid: usize) -> usize {
+fn utask_schedule(next_pid: usize, stack_status: usize) -> usize {
     let uscheduler = USER_SCHEDULER.get().unwrap();
     let current_pid = uscheduler.global_index();
     if next_pid == current_pid {

@@ -1,7 +1,7 @@
 use crate::{
     get_sp,
     interface::{SMPVirtImpl, Stack, StackVirtImpl, CPU_NUM, SMP, STACK_POOL_SIZE},
-    schedule_loop::{run_coroutine, run_thread},
+    main_loop::{run_coroutine, run_thread},
     switch_sp_tratrampoline,
 };
 use heapless::vec::Vec;
@@ -110,7 +110,9 @@ impl StackHandler {
     pub fn new() -> Self {
         let mut stacks = Vec::new();
         for _ in 0..STACK_POOL_SIZE - CPU_NUM {
-            stacks.push(StackWapper::new()).expect("failed to create new stack");
+            stacks
+                .push(StackWapper::new())
+                .expect("failed to create new stack");
         }
         Self {
             free_stacks: stacks,

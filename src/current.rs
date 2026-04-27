@@ -1,9 +1,7 @@
 //! 指示当前状态的全局变量
 //!
 
-use core::{
-    sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering},
-};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
 use lazyinit::LazyInit;
 use spin::mutex::SpinMutex;
@@ -11,7 +9,7 @@ use vdso_helper::{get_vvar_data, vvar_data};
 
 use crate::{
     interface::{SMPVirtImpl, TaskVirtImpl, UserData, UserDataVirtImpl, CPU_NUM, SMP},
-    scheduler::{ProcessInfoTable, Scheduler},
+    schedule::{process_info::ProcessInfoTable, scheduler::Scheduler},
     stack::StackHandler,
 };
 

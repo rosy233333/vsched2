@@ -25,9 +25,9 @@
 
 use core::arch::global_asm;
 
-/// 全局宏定义，用于兼容32位和64位的差异
+// 全局宏定义，用于兼容32位和64位的差异
+#[cfg(target_arch = "riscv32")]
 global_asm!(
-    #[cfg(target_arch = "riscv32")]
     r#"
     .macro lx
         lw
@@ -36,7 +36,11 @@ global_asm!(
         4
     .endm
     "#,
-    #[cfg(target_arch = "riscv64")]
+);
+
+// 全局宏定义，用于兼容32位和64位的差异
+#[cfg(target_arch = "riscv64")]
+global_asm!(
     r#"
     .macro lx
         ld
@@ -124,7 +128,7 @@ macro_rules! switch_sp_tratrampoline {
             mv sp, a0
             j {}
         "#, sym $f) // 这里我的编译器（2025-12-12）提示不能加分号，否则报错：
-                    // “railing semicolon in macro used in expression position. 
+                    // “railing semicolon in macro used in expression position.
                     // this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!”
     };
 }
@@ -179,9 +183,9 @@ macro_rules! set_pre_stack {
 macro_rules! set_user_pre_stack {
     ($f:expr) => {
         // unsafe {
-            // core::arch::asm!("
-            //     csrw uscratch, {}
-            // ", in(reg) $f);
+        // core::arch::asm!("
+        //     csrw uscratch, {}
+        // ", in(reg) $f);
         // }
     };
 }

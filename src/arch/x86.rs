@@ -33,8 +33,8 @@
 use core::arch::global_asm;
 
 /// 全局宏定义，用于兼容32位和64位的差异
+#[cfg(target_arch = "x86_32")]
 global_asm!(
-    #[cfg(target_arch = "x86_32")]
     r#"
     .macro movx
         movl
@@ -84,7 +84,11 @@ global_asm!(
         4
     .endm
     "#,
-    #[cfg(target_arch = "x86_64")]
+);
+
+/// 全局宏定义，用于兼容32位和64位的差异
+#[cfg(target_arch = "x86_64")]
+global_asm!(
     r#"
     .macro movx
         movq
