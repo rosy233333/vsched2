@@ -7,15 +7,15 @@
 use core::{sync::atomic::Ordering, task::Poll};
 
 use crate::{
-    current::{get_current_task, get_user_data, set_current_task, STACK_HANDLER, USER_SCHEDULER},
+    current::{STACK_HANDLER, USER_SCHEDULER, get_current_task, get_user_data, set_current_task},
     interface::{
-        Context, ContextVirtImpl, SMPVirtImpl, Task, TaskState, TaskVirtImpl, VSpace,
-        VSpaceVirtImpl, SMP,
+        Context, ContextVirtImpl, SMP, SMPVirtImpl, Task, TaskState, TaskVirtImpl, TrapHandle, TrapHandleVirtImpl, VSpace, VSpaceVirtImpl
     },
     jump_to_trampoline,
     scheduler::Scheduler,
+    set_pre_stack, stack::{coroutine_trampoline, thread_trampoline}
 };
-use vdso_helper::{get_vvar_data, vvar_data};
+use vdso_helper::get_vvar_data;
 
 /// 同步trap入口
 ///
@@ -39,7 +39,40 @@ use vdso_helper::{get_vvar_data, vvar_data};
 /// - 3: `utok_schedule`
 #[no_mangle]
 pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
-    todo!()
+    match trap_type {
+        // 普通同步 trap，进入 trap 处理流程。
+        0 => {
+            if privilege == 0 {
+                let new_stack_base = get_vvar_data!(KERNEL_STACKS).lock().alloc_stack().base;
+                set_pre_stack!(new_stack_base);
+            } else if privilege == 1 {
+                // let new_stack_base = STACK_HANDLER.lock().alloc_stack().base;
+                // set_user_pre_stack!(new_stack_base);
+                unimplemented!("user mode not supported yet")
+            } else {
+                unreachable!("unknown privilege level: {privilege}")
+            }
+            0
+        }
+        // 外部中断，将当前任务重新放回就绪态后进入对应调度器。
+        1 => {
+            get_current_task().set_state(TaskState::Ready);
+            if privilege == 0 {
+                let new_stack_base = get_vvar_data!(KERNEL_STACKS).lock().alloc_stack().base;
+                set_pre_stack!(new_stack_base);
+                1
+            } else if privilege == 1 {
+                // let new_stack_base = STACK_HANDLER.lock().alloc_stack().base;
+                // sset_user_pre_stack!(new_stack_base);
+                2
+            } else {
+                unreachable!("unknown privilege level: {privilege}")
+            }
+        }
+        // 从用户态调度器主动陷入内核，只需要继续进入内核侧调度。
+        2 => 3,
+        _ => unreachable!("unknown trap type: {trap_type}"),
+    }
 }
 
 // /// 用户态同步trap入口
@@ -69,7 +102,13 @@ pub extern "C" fn thread_entry() -> usize {
 /// 获取trap处理任务并传入当前上下文，设置trap处理任务为当前上下文，进入`run_task`
 #[no_mangle]
 pub extern "C" fn trap_handle() {
-    todo!()
+    let current_task = get_current_task();
+    let handler_ptr = TrapHandleVirtImpl::get_handler(current_task.to_ptr());
+    assert!(!handler_ptr.is_null(), "Trap Handler should not be null");
+    let handler_task = unsafe { TaskVirtImpl::from_ptr(handler_ptr) };
+    handler_task.set_pid(current_task.pid());
+    handler_task.set_state(TaskState::Running);
+    set_current_task(handler_task);
 }
 
 /// 内核的调度与地址空间、特权级切换函数
@@ -151,7 +190,7 @@ fn push_prev_task(current_scheduler: &Scheduler) {
     let current_task = get_current_task();
     if current_task.state() == TaskState::Ready {
         todo!("实现就绪队列");
-        current_scheduler.ready_queue.push(current_task.to_ptr());
+        // current_scheduler.ready_queue.push(current_task.to_ptr());
     }
 }
 
@@ -246,11 +285,6 @@ fn ktask_schedule(next_pid: usize) -> usize {
 /// ```
 #[no_mangle]
 pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
-    let in_kernel = privilege == 0;
-    // let ret_addr: usize;
-    // unsafe {
-    //     core::arch::asm!("mv {}, ra", out(reg) ret_addr);
-    // }
     if get_current_task().is_coroutine() {
         // 切换或回收栈
         let new_sp = {
@@ -294,7 +328,8 @@ pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
 pub extern "C" fn krun_utask(stack_status: usize) {
     if get_current_task().is_coroutine() {
         let user_sp = {
-            let mut stack_handler = STACK_HANDLER.lock();
+            let stack_handler = unsafe { get_user_data(&STACK_HANDLER) };
+            let mut stack_handler = stack_handler.lock();
             stack_handler.get_empty_stack(stack_status)
         };
         {
@@ -332,7 +367,7 @@ pub extern "C" fn krun_utask(stack_status: usize) {
 ///     - 0: 内核态
 ///     - 1: 用户态
 #[no_mangle]
-unsafe extern "C" fn run_coroutine() -> usize {
+pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
     get_current_task().set_state(TaskState::Running);
     let res = get_current_task().poll();
     // ************** 协程主动让权的入口 **************
@@ -359,7 +394,7 @@ unsafe extern "C" fn run_coroutine() -> usize {
 
 /// 运行线程
 #[no_mangle]
-unsafe extern "C" fn run_thread() -> ! {
+pub(crate) unsafe extern "C" fn run_thread() -> ! {
     get_current_task().set_state(TaskState::Running);
     get_current_task().restore_context();
     unreachable!();
@@ -367,7 +402,7 @@ unsafe extern "C" fn run_thread() -> ! {
 
 /// 从内核态运行用户态的协程
 #[no_mangle]
-unsafe extern "C" fn run_coroutine_into_user(user_sp: usize) -> ! {
+pub(crate) unsafe extern "C" fn run_coroutine_into_user(user_sp: usize) -> ! {
     // todo：把user_sp传入into_user里
     ContextVirtImpl::into_user();
     unreachable!();

@@ -2,7 +2,6 @@
 //!
 
 use core::{
-    ptr::{null, null_mut},
     sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering},
 };
 
@@ -11,9 +10,9 @@ use spin::mutex::SpinMutex;
 use vdso_helper::{get_vvar_data, vvar_data};
 
 use crate::{
-    interface::{ContextVirtImpl, SMPVirtImpl, TaskVirtImpl, CPU_NUM, SMP},
+    interface::{SMPVirtImpl, TaskVirtImpl, UserData, UserDataVirtImpl, CPU_NUM, SMP},
     scheduler::{ProcessInfoTable, Scheduler},
-    stack::{StackHandler, StackWapper},
+    stack::StackHandler,
 };
 
 // / 当前栈变量以栈底指针形式存储，实现为perCPU的私有数据。
@@ -87,7 +86,18 @@ pub(crate) static STACK_HANDLER: LazyInit<SpinMutex<StackHandler>> = LazyInit::n
 ///
 /// 因为即使在一个地址空间中，用户态和内核态的vDSO私有数据也是分开的，因此需要借助这个函数进行地址运算，获得用户态对应数据的引用。
 ///
-/// 因为访问的是用户态子空间的数据，因此不能在切换地址空间前后访问该函数返回的同一份引用。
-pub(crate) unsafe fn get_user_data<T>(kernel_ref: &T) -> &T {
-    todo!();
+/// # Safety
+///
+/// - 因为访问的是用户态子空间的数据，因此不能在切换地址空间前后访问该函数返回的同一份引用。
+pub(crate) unsafe fn get_user_data<T>(data: &T) -> &T {
+    let kernel_addr = data as *const T as usize;
+    let len = core::mem::size_of::<T>();
+
+    let user_ptr = UserDataVirtImpl::get_user_data(kernel_addr, len);
+    assert!(
+        !user_ptr.is_null(),
+        "UserData::get_user_data returned a null pointer"
+    );
+
+    unsafe { &*(user_ptr as *const T) }
 }

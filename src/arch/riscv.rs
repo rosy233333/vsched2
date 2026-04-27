@@ -123,7 +123,9 @@ macro_rules! switch_sp_tratrampoline {
         core::arch::naked_asm!(r#"
             mv sp, a0
             j {}
-        "#, sym $f);
+        "#, sym $f) // 这里我的编译器（2025-12-12）提示不能加分号，否则报错：
+                    // “railing semicolon in macro used in expression position. 
+                    // this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!”
     };
 }
 
@@ -156,6 +158,31 @@ macro_rules! get_sp {
             ", out(reg) sp, options(nostack));
             sp
         }
+    };
+}
+
+/// 设置新的sscratch寄存器的值。
+#[macro_export]
+macro_rules! set_pre_stack {
+    ($f:expr) => {
+        unsafe {
+            core::arch::asm!("
+                csrw sscratch, {}
+            ", in(reg) $f);
+        }
+    };
+}
+
+// TODO：？
+/// 设置新的uscratch寄存器的值。
+#[macro_export]
+macro_rules! set_user_pre_stack {
+    ($f:expr) => {
+        // unsafe {
+            // core::arch::asm!("
+            //     csrw uscratch, {}
+            // ", in(reg) $f);
+        // }
     };
 }
 
