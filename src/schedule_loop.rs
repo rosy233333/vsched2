@@ -7,13 +7,17 @@
 use core::{sync::atomic::Ordering, task::Poll};
 
 use crate::{
-    current::{STACK_HANDLER, USER_SCHEDULER, get_current_task, get_user_data, set_current_task},
+    current::{
+        self, get_current_task, get_user_data, set_current_task, STACK_HANDLER, USER_SCHEDULER,
+    },
     interface::{
-        Context, ContextVirtImpl, SMP, SMPVirtImpl, Task, TaskState, TaskVirtImpl, TrapHandle, TrapHandleVirtImpl, VSpace, VSpaceVirtImpl
+        Context, ContextVirtImpl, SMPVirtImpl, Task, TaskState, TaskVirtImpl, TrapHandle,
+        TrapHandleVirtImpl, VSpace, VSpaceVirtImpl, SMP,
     },
     jump_to_trampoline,
     scheduler::Scheduler,
-    set_pre_stack, stack::{coroutine_trampoline, thread_trampoline}
+    set_pre_stack,
+    stack::{coroutine_trampoline, thread_trampoline},
 };
 use vdso_helper::get_vvar_data;
 
@@ -144,7 +148,16 @@ pub extern "C" fn kschedule() -> usize {
 /// - `stack_status`: 代表栈的状态，0为空栈，1为非空栈。
 #[no_mangle]
 pub extern "C" fn uschedule(stack_status: usize) {
-    todo!()
+    let scheduler = USER_SCHEDULER.get().unwrap();
+    push_prev_task(scheduler);
+    loop {
+        let next_pid = process_schedule(scheduler);
+
+        let res = utask_schedule(next_pid);
+        if res == 0 {
+            break;
+        }
+    }
 }
 
 /// 从`uschedule`陷入内核后，执行的调度函数
@@ -248,6 +261,42 @@ fn ktask_schedule(next_pid: usize) -> usize {
         } else {
             return 2;
         }
+    }
+}
+
+/// 仅用户态调用，决定了运行next_pid进程后的工作：
+///
+/// - 若next_pid == current_pid，则在当前调度器中选择优先级最高任务并运行
+/// - 否则更新CURRENT_VSPACE变量、回收栈并进入内核。
+///
+/// 返回值：
+///
+/// - 0：接下来调用run_task
+/// - 1：未获取到任务，需要重新获取任务后重新调用utask_schedule。
+fn utask_schedule(next_pid: usize) -> usize {
+    let uscheduler = USER_SCHEDULER.get().unwrap();
+    let current_pid = uscheduler.global_index();
+    if next_pid == current_pid {
+        // 从当前调度器获取下一任务并运行
+        if let (Some(next_task), new_prio) = uscheduler.take_task() {
+            get_vvar_data!(PROCESS_INFO_TABLE).table[current_pid]
+                .highest_prio
+                .store(new_prio, Ordering::Release);
+            next_task.set_state(TaskState::Running);
+            set_current_task(next_task);
+            return 0;
+        } else {
+            return 1;
+        }
+    } else {
+        // 更新CURRENT_VSPACE变量、回收栈并进入内核
+        get_vvar_data!(CURRENT_VSPACE)[SMPVirtImpl::cpu_id()].store(next_pid, Ordering::Release);
+        // todo: 检查栈切换是否会影响函数返回
+        {
+            let mut stack_handler = STACK_HANDLER.lock();
+            stack_handler.get_thread_stack(None, stack_status);
+        };
+        ContextVirtImpl::into_kernel();
     }
 }
 
