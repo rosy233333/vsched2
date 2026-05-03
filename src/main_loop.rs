@@ -8,7 +8,7 @@ use core::{sync::atomic::Ordering, task::Poll};
 
 use crate::{
     current::{
-        self, get_current_task, get_user_data, set_current_task, STACK_HANDLER, USER_SCHEDULER,
+        get_current_task, get_user_data, set_current_task, STACK_HANDLER, USER_SCHEDULER,
     },
     interface::{
         Context, ContextVirtImpl, SMPVirtImpl, Task, TaskState, TaskVirtImpl, TrapHandle,
@@ -202,7 +202,12 @@ fn switch_vspace(vspace_pid: usize) {
 fn push_prev_task(current_scheduler: &Scheduler) {
     let current_task = get_current_task();
     if current_task.state() == TaskState::Ready {
-        current_scheduler.push_task(current_task);
+        match current_scheduler.push_task(current_task) {
+            Ok(()) => (),
+            Err(task) => {
+                panic!("Failed to push task back to scheduler: {:?}", task.to_ptr());
+            }
+        };
     }
 }
 
@@ -336,7 +341,7 @@ pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
     if get_current_task().is_coroutine() {
         // 切换或回收栈
         let new_sp = {
-            let mut stack_handler = if privilege == 0 {
+            let mut stack_handler = if privilege != 0 {
                 STACK_HANDLER.lock()
             } else {
                 get_vvar_data!(KERNEL_STACKS).lock()
@@ -350,7 +355,7 @@ pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
     } else {
         let thread_stack = { get_current_task().thread_stack_base() };
         {
-            let mut stack_handler = if privilege == 0 {
+            let mut stack_handler = if privilege != 0 {
                 STACK_HANDLER.lock()
             } else {
                 get_vvar_data!(KERNEL_STACKS).lock()
@@ -421,12 +426,16 @@ pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
     // ************** 协程主动让权的入口 **************
     match res {
         Poll::Ready(val) => {
-            // todo：val怎么处理？task里是否需要一个设置返回值的接口？
+            get_current_task().set_return_value(val);
             get_current_task().set_state(TaskState::Exited);
         }
         Poll::Pending => {
-            // todo：这里也有可能是 Ready 状态，需要后续实现中再修改
-            get_current_task().set_state(TaskState::Blocked);
+            if get_current_task().state() == TaskState::Running {
+                get_current_task().set_state(TaskState::Blocked);
+            } else {
+                // 不应该有这种情况，所有通过run_task进入的任务都应该是Running态
+                panic!("run_coroutine: current task is not in Running state");
+            }
         }
     }
     let in_kernel = {
@@ -451,14 +460,15 @@ pub(crate) unsafe extern "C" fn run_thread() -> ! {
 /// 从内核态运行用户态的协程
 #[no_mangle]
 pub(crate) unsafe extern "C" fn run_coroutine_into_user(user_sp: usize) -> ! {
-    // todo：把user_sp传入into_user里
-    ContextVirtImpl::into_user();
+    get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].store(false, Ordering::Release);
+    ContextVirtImpl::into_user(user_sp);
     unreachable!();
 }
 
 /// 从内核态运行用户态的线程
 #[no_mangle]
 unsafe extern "C" fn run_thread_into_user() -> ! {
+    get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].store(false, Ordering::Release);
     ContextVirtImpl::into_user_context(get_current_task() as *const TaskVirtImpl as *const ());
     unreachable!();
 }

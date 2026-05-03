@@ -45,6 +45,8 @@ trait_interface! {
         fn poll(&self) -> Poll<usize>;
         /// 获取线程上下文保存的栈底指针
         fn thread_stack_base(&self) -> usize;
+        /// 设置协程运行返回值
+        fn set_return_value(&self, value: usize);
     }
 }
 
@@ -68,8 +70,10 @@ trait_interface! {
         fn into_kernel() -> !;
         /// 在调度中进入用户态，在空栈中进入`run_task`函数
         ///
+        /// 参数为进入用户态时应该使用的用户栈的栈顶地址，即sp寄存器的值
+        /// 
         /// 在内核态调度到用户协程后使用
-        fn into_user();
+        fn into_user(ustack: usize);
         /// 在调度中进入用户态寄存器上下文
         ///
         /// 参数中的指针指向外部定义的Task类型

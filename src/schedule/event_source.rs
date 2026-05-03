@@ -6,6 +6,7 @@
 ///
 /// 事件源需要实现内部可变性和与之适配的同步机制
 #[repr(C)]
+#[derive(Debug)]
 pub struct EventSorceVtable {
     /// 获取当前事件源中就绪任务的最高优先级。
     ///

@@ -54,11 +54,9 @@ vvar_data! {
     ///
     /// 存储了进程的最高优先级（全局共享）和地址空间（仅内核态访问），且承担了分配进程号的功能。
     PROCESS_INFO_TABLE: ProcessInfoTable,
-    /// 内核栈，实现为非perCPU的共享数据。
+    /// 内核栈池，实现为非perCPU的共享数据。
     ///
-    /// 每个CPU分配一个内核栈，在trap时作为trap处理协程的栈使用
-    ///
-    /// TODO：考虑内核任务支持线程接口
+    /// 每个CPU分配一个内核栈池，管理内核态使用的栈
     KERNEL_STACKS: SpinMutex<StackHandler>,
 }
 
