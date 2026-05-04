@@ -7,9 +7,7 @@
 use core::{sync::atomic::Ordering, task::Poll};
 
 use crate::{
-    current::{
-        get_current_task, get_user_data, set_current_task, STACK_HANDLER, USER_SCHEDULER,
-    },
+    current::{get_current_task, get_user_data, set_current_task, STACK_HANDLER, USER_SCHEDULER},
     interface::{
         Context, ContextVirtImpl, SMPVirtImpl, Task, TaskState, TaskVirtImpl, TrapHandle,
         TrapHandleVirtImpl, VSpace, VSpaceVirtImpl, SMP,
@@ -191,6 +189,10 @@ fn switch_vspace(vspace_pid: usize) {
         let vspace_ptr = get_vvar_data!(PROCESS_INFO_TABLE).table[vspace_pid]
             .vspace
             .load(Ordering::Acquire);
+        if vspace_ptr.is_null() {
+            // 代表下一进程可以在所有地址空间下运行，当前实现中只有单页表情况下的内核进程符合该条件，因此切换到该进程时不需要切换地址空间。
+            return;
+        }
         let vspace = unsafe { *vspace_ptr };
         // 切换地址空间理论上不会影响代码的执行，因为此处的数据均位于内核子空间中，而切换只会影响到用户子空间。
         // 需要确认？

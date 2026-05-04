@@ -71,7 +71,7 @@ trait_interface! {
         /// 在调度中进入用户态，在空栈中进入`run_task`函数
         ///
         /// 参数为进入用户态时应该使用的用户栈的栈顶地址，即sp寄存器的值
-        /// 
+        ///
         /// 在内核态调度到用户协程后使用
         fn into_user(ustack: usize);
         /// 在调度中进入用户态寄存器上下文
@@ -82,8 +82,11 @@ trait_interface! {
         fn into_user_context(task: *const ());
         /// 在内核态切换地址空间
         ///
-        /// 目前还不清楚使用什么类型代表地址空间
-        fn switch_vspace(vspace: *const ());
+        /// 以进程号（全局进程表中的索引）表示地址空间。
+        ///
+        /// 若位于内核，则进程号为当前地址空间所属进程的进程号。
+        /// （这一点与调度器中不同，因为同一个调度器可以包含属于多个地址空间的内核态任务。）
+        fn switch_vspace(vspace_pid: *const ());
     }
 }
 

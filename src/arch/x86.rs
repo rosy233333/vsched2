@@ -173,7 +173,7 @@ macro_rules! switch_sp_tratrampoline {
             movx (di), si
             movx sp, di
             jmp {}
-        "#, sym $f);
+        "#, sym $f)
     };
 }
 

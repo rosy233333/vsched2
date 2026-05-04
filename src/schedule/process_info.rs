@@ -16,7 +16,9 @@ pub(crate) struct ProcessInfoTable {
     ///
     /// 分配进程号后，需要将对应的`ProcessInfo.valid`置为`true`以表示该索引被占用。
     /// 若该索引已被占用，则继续分配下一个索引，直到找到一个未被占用的索引或遍历完整个数组。
-    next_index: AtomicUsize,
+    ///
+    /// （在本文件的命名中，用`i`代表未取模的数据，用`index`代表已取模的数据）
+    next_i: AtomicUsize,
 }
 
 /// 进程信息数据结构，实现了内部可变性。
@@ -34,12 +36,14 @@ pub(crate) struct ProcessInfo {
     ///
     /// AtomicPtr指向的内容（`*mut ()`）为存储在内核空间的页表根节点，
     /// 通过这种方式限制地址空间信息只能在内核态访问。
+    ///
+    /// 地址空间指针可以为空，这代表该进程可以在所有地址空间下运行，目前应该只有单页表情况下的内核进程符合该条件。
     pub(crate) vspace: AtomicPtr<*mut ()>,
 }
 
 impl Default for ProcessInfoTable {
     fn default() -> Self {
-        let mut default = Self {
+        let default = Self {
             table: [const {
                 ProcessInfo {
                     valid: AtomicBool::new(false),
@@ -47,7 +51,7 @@ impl Default for ProcessInfoTable {
                     vspace: AtomicPtr::new(core::ptr::null_mut()),
                 }
             }; PROCESS_NUM],
-            next_index: AtomicUsize::new(1),
+            next_i: AtomicUsize::new(1),
         };
         default.table[0].valid.store(true, Ordering::Release);
         default
@@ -59,13 +63,13 @@ impl ProcessInfoTable {
     ///
     /// 若分配成功，则返回Some(索引)；若分配失败（即表中没有空位），则返回None。
     pub fn register_process(&self) -> Option<usize> {
-        let start_index = self.next_index.fetch_add(1, Ordering::AcqRel) % PROCESS_NUM;
+        let start_index = self.next_i.fetch_add(1, Ordering::AcqRel) % PROCESS_NUM;
         let mut index = start_index;
         loop {
             if !self.table[index].valid.swap(true, Ordering::AcqRel) {
                 return Some(index);
             }
-            index = self.next_index.fetch_add(1, Ordering::AcqRel) % PROCESS_NUM;
+            index = self.next_i.fetch_add(1, Ordering::AcqRel) % PROCESS_NUM;
             if index == start_index {
                 return None;
             }
@@ -83,29 +87,30 @@ impl ProcessInfoTable {
     ///
     /// 若不是，则暂未规定以什么方式从所有最高优先级的进程中选择一个。
     pub fn highest_prio_process(&self, current_process: usize) -> usize {
-        let next_index = self.next_index.load(Ordering::Acquire);
-        let start = if next_index >= PROCESS_NUM {
-            next_index - PROCESS_NUM
+        let next_i = self.next_i.load(Ordering::Acquire);
+        let start = if next_i >= PROCESS_NUM {
+            next_i - PROCESS_NUM
         } else {
             0
         };
-        let end = next_index;
+        let end = next_i;
 
         let mut highest_prio: isize = isize::MAX;
         let mut processes: Vec<usize, PROCESS_NUM> = Vec::new();
         for i in start..end {
-            if !self.table[i].valid.load(Ordering::Acquire) {
+            let index = i % PROCESS_NUM;
+            if !self.table[index].valid.load(Ordering::Acquire) {
                 continue;
             }
-            let prio = self.table[i].highest_prio.load(Ordering::Acquire);
-            if !self.table[i].valid.load(Ordering::Acquire) {
+            let prio = self.table[index].highest_prio.load(Ordering::Acquire);
+            if !self.table[index].valid.load(Ordering::Acquire) {
                 continue;
             }
             if prio < highest_prio {
                 highest_prio = prio;
-                processes = Vec::from([i]);
+                processes = Vec::from([index]);
             } else if prio == highest_prio {
-                processes.push(i);
+                processes.push(index);
             }
         }
         if processes.contains(&current_process) {
