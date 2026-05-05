@@ -138,15 +138,36 @@ macro_rules! switch_sp_tratrampoline {
 /// 如果不需换栈，则new_sp为当前栈的栈底。
 ///
 /// 详见`switch_sp_trampoline`的注释。
+///
+/// 由于 global_asm! 定义的 .macro 汇编译宏对 asm! 内联汇编块不可见，
+/// 导致 lx/XLEN 汇编宏无法生效，因此采用条件编译直接写入对应架构的指令。
+/// riscv32: lw ra, -4(fp)
+/// riscv64: ld ra, -8(fp)
 #[macro_export]
 macro_rules! jump_to_trampoline {
     ($trampoline_fn:ident, $new_sp:ident) => {
         unsafe {
-            // a0: 新的sp；ra: 返回地址
-            core::arch::asm!(r#"
-                lx ra, -XLEN(fp)
+            // a0: 新的sp；ra: 返回地址（已加密保存在栈中）
+            #[cfg(target_arch = "riscv32")]
+            core::arch::asm!(
+                r#"
+                lw ra, -4(fp)
                 j {}
-            "#, sym $trampoline_fn, in("a0") $new_sp, options(noreturn))
+            "#,
+                sym $trampoline_fn,
+                in("a0") $new_sp,
+                options(noreturn),
+            );
+            #[cfg(target_arch = "riscv64")]
+            core::arch::asm!(
+                r#"
+                ld ra, -8(fp)
+                j {}
+            "#,
+                sym $trampoline_fn,
+                in("a0") $new_sp,
+                options(noreturn),
+            );
         }
     };
 }

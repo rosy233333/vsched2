@@ -1,3 +1,5 @@
+#[allow(non_snake_case)]
+
 fn main() {
     vdso_helper::mut_cfg! {
         /// CPU核心数量

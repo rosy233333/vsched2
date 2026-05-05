@@ -1,3 +1,6 @@
+// 启用了 #![deny(missing_docs)]，但这里缺少注释，先允许missing_docs，后续再补充注释。
+#![allow(missing_docs)]
+
 use core::task::Poll;
 use vdso_helper::{trait_interface, use_mut_cfg};
 
@@ -139,23 +142,6 @@ trait_interface! {
         fn get_user_data(pos: usize, len: usize) -> *mut ();
     }
 }
-
-// 这里不该是trait_interface，而应该是模块提供给外界的接口
-// trait_interface! {
-//     /// 调度器
-//     pub trait Scheduler {
-//         /// 注册事件源
-//         ///
-//         /// index参数为事件源的插入位置，在获取到的最高优先级相同时，优先选择位置靠前的事件源。
-//         ///
-//         /// index为0或正数时在index位置插入事件源，index为负数时在倒数第index位置插入事件源。插入成功则返回true。
-//         ///
-//         /// 若index>len或index<-len-1（len为当前事件源数量），则插入失败，返回false。
-//         fn register_event_source(&self, event_source: *const (), vtable: *const EventSorceVtable, index: isize) -> bool;
-//         /// 取消注册事件源
-//         fn unregister_event_source(&self, event_source: *const ());
-//     }
-// }
 
 #[repr(u8)]
 #[derive(PartialEq)]
