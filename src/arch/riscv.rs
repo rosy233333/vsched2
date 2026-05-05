@@ -139,7 +139,7 @@ macro_rules! switch_sp_tratrampoline {
 ///
 /// 详见`switch_sp_trampoline`的注释。
 ///
-/// 注意：由于 LLVM 中 global_asm! 定义的 .macro 汇编译宏对 asm! 内联汇编块不可见，
+/// 由于 global_asm! 定义的 .macro 汇编译宏对 asm! 内联汇编块不可见，
 /// 导致 lx/XLEN 汇编宏无法生效，因此采用条件编译直接写入对应架构的指令。
 /// riscv32: lw ra, -4(fp)
 /// riscv64: ld ra, -8(fp)

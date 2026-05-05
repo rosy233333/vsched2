@@ -1,6 +1,4 @@
-// vsched2 启用了 #![deny(missing_docs)]，但由于 interface 模块现已公开，
-// 且 trait_interface! 宏生成的 trait 和 TaskState 枚举部分缺少文档注释，
-// 因此需要在模块内部关闭 missing_docs 检查以避免编译错误。
+// 启用了 #![deny(missing_docs)]，但这里缺少注释，先允许missing_docs，后续再补充注释。
 #![allow(missing_docs)]
 
 use core::task::Poll;
@@ -144,11 +142,6 @@ trait_interface! {
         fn get_user_data(pos: usize, len: usize) -> *mut ();
     }
 }
-
-// 注意：Scheduler trait 已被移除，不再通过 trait_interface! 对外暴露。
-// Scheduler 的实现已通过模块内部接口直接提供（参见 schedule/scheduler.rs），
-// 而不是通过 vDSO 的虚表机制。build_vdso 工具的正则解析器不识别 Rust 注释，
-// 因此注释掉的 trait_interface! 代码可能导致其错误地期望在 .dynsym 中找到 init_vtable_Scheduler 函数。
 
 #[repr(u8)]
 #[derive(PartialEq)]
