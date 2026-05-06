@@ -29,12 +29,10 @@ use core::arch::global_asm;
 #[cfg(target_arch = "riscv32")]
 global_asm!(
     r#"
-    .macro lx
-        lw
+    .macro lx arg1, arg2
+        lw \arg1, \arg2
     .endm
-    .macro XLEN
-        4
-    .endm
+    .set XLEN, 4
     "#,
 );
 
@@ -42,12 +40,10 @@ global_asm!(
 #[cfg(target_arch = "riscv64")]
 global_asm!(
     r#"
-    .macro lx
-        ld
+    .macro lx arg1, arg2
+        ld \arg1, \arg2
     .endm
-    .macro XLEN
-        8
-    .endm
+    .set XLEN, 8
     "#,
 );
 

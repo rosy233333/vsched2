@@ -33,23 +33,23 @@
 use core::arch::global_asm;
 
 /// 全局宏定义，用于兼容32位和64位的差异
-#[cfg(target_arch = "x86_32")]
+#[cfg(target_arch = "x86")]
 global_asm!(
     r#"
-    .macro movx
-        movl
+    .macro movx arg1, arg2
+        movl \arg1, \arg2
     .endm
-    .macro andx
-        andl
+    .macro andx arg1, arg2
+        andl \arg1, \arg2
     .endm
-    .macro addx
-        addl
+    .macro addx arg1, arg2
+        addl \arg1, \arg2
     .endm
-    .macro subx
-        subl
+    .macro subx arg1, arg2
+        subl \arg1, \arg2
     .endm
-    .macro cmpx
-        cmpl
+    .macro cmpx arg1, arg2
+        cmpl \arg1, \arg2
     .endm
     .macro reg0
         di
@@ -61,14 +61,14 @@ global_asm!(
     .macro push_0_arg
         subl sp, 12
     .endm
-    .macro push_1_arg arg0
+    .macro push_1_arg arg1
         subl sp, 8
-        pushl \arg0
-    .endm
-    .macro push_2_arg arg0, arg1
-        subl sp, 4
         pushl \arg1
-        pushl \arg0
+    .endm
+    .macro push_2_arg arg1, arg2
+        subl sp, 4
+        pushl \arg2
+        pushl \arg1
     .endm
     # push_x_arg: 函数调用后的平衡堆栈
     .macro pop_0_arg
@@ -80,9 +80,7 @@ global_asm!(
     .macro pop_2_arg
         addl sp, 12
     .endm
-    .macro XLEN
-        4
-    .endm
+    .set XLEN, 4
     "#,
 );
 
@@ -90,20 +88,20 @@ global_asm!(
 #[cfg(target_arch = "x86_64")]
 global_asm!(
     r#"
-    .macro movx
-        movq
+    .macro movx arg1, arg2
+        movq \arg1, \arg2
     .endm
-    .macro andx
-        andq
+    .macro andx arg1, arg2
+        andq \arg1, \arg2
     .endm
-    .macro addx
-        addq
+    .macro addx arg1, arg2
+        addq \arg1, \arg2
     .endm
-    .macro subx
-        subq
+    .macro subx arg1, arg2
+        subq \arg1, \arg2
     .endm
-    .macro cmpx
-        cmpq
+    .macro cmpx arg1, arg2
+        cmpq \arg1, \arg2
     .endm
     .macro reg0
         r12
@@ -115,14 +113,14 @@ global_asm!(
     .macro push_0_arg
         subq sp, 8
     .endm
-    .macro push_1_arg arg0
+    .macro push_1_arg arg1
         subq sp, 8
-        movq di, \arg0
+        movq di, \arg1
     .endm
-    .macro push_2_arg arg0, arg1
+    .macro push_2_arg arg1, arg2
         subq sp, 8
-        movq di, \arg0
-        movq si, \arg1
+        movq di, \arg1
+        movq si, \arg2
     .endm
     # push_x_arg: 函数调用后的平衡堆栈
     .macro pop_0_arg
@@ -134,9 +132,7 @@ global_asm!(
     .macro pop_2_arg
         addq sp, 8
     .endm
-    .macro XLEN
-        8
-    .endm
+    .set XLEN, 8
     "#,
 );
 
@@ -167,7 +163,7 @@ macro_rules! switch_sp_tratrampoline {
         // 在call前，sp需要对齐到16字节。也就是说，存放返回地址的位置需要模16余16-XLEN。
         // 在放入返回地址之前，需要先使新的sp（存放返回地址的位置）满足对齐要求。
         core::arch::naked_asm!(r#"
-            addx di, XLEN
+            add di, XLEN
             andx di, -16
             subx di, XLEN
             movx (di), si
@@ -192,6 +188,33 @@ macro_rules! jump_to_trampoline {
                 jmp {}
             "#, sym $trampoline_fn, in("di") $new_sp, options(noreturn))
         }
+    };
+}
+
+/// 获取sp寄存器的值。
+#[macro_export]
+macro_rules! get_sp {
+    () => {
+        unsafe {
+            let sp: usize;
+            core::arch::asm!("
+                movx {}, sp
+            ", out(reg) sp, options(nostack));
+            sp
+        }
+    };
+}
+
+/// 设置新的sscratch寄存器的值。
+#[macro_export]
+macro_rules! set_pre_stack {
+    ($f:expr) => {
+        todo!();
+        // unsafe {
+        //     core::arch::asm!("
+        //         csrw sscratch, {}
+        //     ", in(reg) $f);
+        // }
     };
 }
 
