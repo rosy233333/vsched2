@@ -109,7 +109,7 @@ pub extern "C" fn trap_handle() {
     assert!(!handler_ptr.is_null(), "Trap Handler should not be null");
     let handler_task = unsafe { TaskVirtImpl::from_ptr(handler_ptr) };
     handler_task.set_pid(current_task.pid());
-    handler_task.set_state(TaskState::Running);
+    // handler_task.set_state(TaskState::Running);
     set_current_task(handler_task);
 }
 
@@ -246,7 +246,7 @@ fn ktask_schedule(next_pid: usize) -> usize {
                 .highest_prio
                 .store(new_prio, Ordering::Release);
             switch_vspace(next_task.pid());
-            next_task.set_state(TaskState::Running);
+            // next_task.set_state(TaskState::Running);
             set_current_task(next_task);
             return 0; // 一定是内核态任务
         } else {
@@ -261,7 +261,7 @@ fn ktask_schedule(next_pid: usize) -> usize {
             get_vvar_data!(PROCESS_INFO_TABLE).table[next_pid]
                 .highest_prio
                 .store(new_prio, Ordering::Release);
-            next_task.set_state(TaskState::Running);
+            // next_task.set_state(TaskState::Running);
             set_current_task(next_task);
             return 1; // 一定是用户态任务
         } else {
@@ -288,7 +288,7 @@ fn utask_schedule(next_pid: usize, stack_status: usize) -> usize {
             get_vvar_data!(PROCESS_INFO_TABLE).table[current_pid]
                 .highest_prio
                 .store(new_prio, Ordering::Release);
-            next_task.set_state(TaskState::Running);
+            // next_task.set_state(TaskState::Running);
             set_current_task(next_task);
             return 0;
         } else {
@@ -403,7 +403,7 @@ pub extern "C" fn krun_utask(stack_status: usize) {
                 .lock()
                 .get_thread_stack(None, stack_status);
         }
-        get_current_task().set_state(TaskState::Running);
+        // get_current_task().set_state(TaskState::Running);
         unsafe {
             // core::arch::asm!("call coroutine_into_user_trampoline", in("a0") user_sp, options(noreturn));
             run_thread_into_user();
@@ -462,6 +462,7 @@ pub(crate) unsafe extern "C" fn run_thread() -> ! {
 /// 从内核态运行用户态的协程
 #[no_mangle]
 pub(crate) unsafe extern "C" fn run_coroutine_into_user(user_sp: usize) -> ! {
+    get_current_task().set_state(TaskState::Running);
     get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].store(false, Ordering::Release);
     ContextVirtImpl::into_user(user_sp);
     unreachable!();
@@ -470,6 +471,7 @@ pub(crate) unsafe extern "C" fn run_coroutine_into_user(user_sp: usize) -> ! {
 /// 从内核态运行用户态的线程
 #[no_mangle]
 unsafe extern "C" fn run_thread_into_user() -> ! {
+    get_current_task().set_state(TaskState::Running);
     get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].store(false, Ordering::Release);
     ContextVirtImpl::into_user_context(get_current_task() as *const TaskVirtImpl as *const ());
     unreachable!();
