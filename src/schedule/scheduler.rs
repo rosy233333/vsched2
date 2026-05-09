@@ -16,11 +16,6 @@ use crate::{
 /// 调度器数据结构
 ///
 /// 每个进程的用户部分持有一个调度器实例；所有内核任务共享一个调度器实例。
-///
-/// TODO: Scheudler目前存在的问题：
-///
-/// 1. 初始化时从另一个地址空间访问，导致自引用的指针错误。
-/// 2. 在内核态创建用户进程时，难以将新任务放入用户进程的调度器。
 pub(crate) struct Scheduler {
     /// 事件源数组
     ///
@@ -29,6 +24,8 @@ pub(crate) struct Scheduler {
     /// 也就是要求事件源自身实现内部可变性和与之适配的同步机制。
     ///
     /// `source`的`index=0`处一定为就绪队列。
+    ///
+    /// 事件源的指针为用户空间中的地址，因此在内核中访问时需要经过地址转换。
     // #[pin]
     sources: RwLock<Vec<(*const (), EventSorceVtable), EVENT_SORCE_NUM>>,
     /// 全局进程表中的索引，同时作为进程号使用
@@ -74,6 +71,7 @@ impl Scheduler {
     //         _pin: PhantomPinned,
     //     })
     // }
+    /// 初始化调度器实例
     pub(crate) fn init(self_ref: &LazyInit<Self>, global_index: usize) {
         let ready_queue = ReadyQueue::new();
         self_ref.init_once(Self {
@@ -82,6 +80,37 @@ impl Scheduler {
             ready_queue,
             _pin: PhantomPinned,
         });
+        self_ref
+            .sources
+            .write()
+            .push((
+                &self_ref.ready_queue as *const ReadyQueue as *const (),
+                ReadyQueue::vtable(),
+            ))
+            .unwrap();
+    }
+
+    /// 初始化调度器实例的`sources`以外的字段。
+    ///
+    /// 该函数用于新建进程时，从内核态初始化进程调度器实例。
+    /// 因为在内核态访问用户态地址空间时无法正确处理调度器实例中的自引用指针，因此需要调用该函数初始化`sources`以外的字段。
+    ///
+    /// 内核可能访问进程调度器的`ready_queue`字段，因此需要在内核态即初始化调度器。
+    /// 而内核不会访问`sources`字段，因此其可以在用户态初始化。
+    pub(crate) fn init_except_sources(self_ref: &LazyInit<Self>, global_index: usize) {
+        let ready_queue = ReadyQueue::new();
+        self_ref.init_once(Self {
+            sources: RwLock::new(Vec::new()),
+            global_index,
+            ready_queue,
+            _pin: PhantomPinned,
+        });
+    }
+
+    /// 初始化调度器实例的`sources`字段。
+    ///
+    /// 新建进程时，在内核态调用了`init_except_sources`之后，再在用户态调用`init_sources`以完成调度器实例的初始化。
+    pub(crate) fn init_sources(self_ref: &LazyInit<Self>) {
         self_ref
             .sources
             .write()

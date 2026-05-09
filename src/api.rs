@@ -104,7 +104,13 @@ pub extern "C" fn process_init(vspace_ptr: *mut *mut ()) -> usize {
     // 需要在此处初始化的原因是需要初始化进程调度器，之后才能将该进程的任务放入调度器中。
     let vspace = unsafe { *vspace_ptr };
     let user_scheduler = unsafe { get_user_data(&USER_SCHEDULER, Some(vspace)) };
-    Scheduler::init(user_scheduler, pid);
+    Scheduler::init_except_sources(user_scheduler, pid);
+    get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
+        .scheduler
+        .store(
+            user_scheduler.get().unwrap() as *const Scheduler as *mut Scheduler,
+            Ordering::Release,
+        );
     let stack_handler = unsafe { get_user_data(&STACK_HANDLER, Some(vspace)) };
     stack_handler.init_once(SpinMutex::new(StackHandler::default()));
     pid
@@ -128,41 +134,14 @@ extern "C" {
     pub fn raw_kschedule() -> !;
 }
 
-// /// 在用户态调用的调度器初始化接口，每个用户进程初始化一次。
-// ///
-// /// 该函数不会切换任务。初始化完成后若需切换任务，则需再调用`reschedule`函数。
-// ///
-// /// 参数：
-// ///
-// /// - `init_stack_base`：用户初始化使用的栈（也就是当前栈）的基址，该栈需要可以通过Stack::dealloc回收。
-// /// - `init_task_ptr`：用户初始化执行流（当前执行流）所属的任务指针。需要用户先创建该任务，再将其指针传入该函数中。
-// ///
-// /// 返回值：为该进程分配的pid
-// #[unsafe(no_mangle)]
-// pub extern "C" fn user_init(init_stack_base: *const (), init_task_ptr: *const ()) -> usize {
-//     // 调度器初始化，虽然名称是USER_SCHEDULER，但它是内核调度器的实例，且在内核空间中存储和使用。
-//     let pid = get_vvar_data!(PROCESS_INFO_TABLE)
-//         .register_process()
-//         .expect("Failed to register process");
-//     Scheduler::init(&USER_SCHEDULER, 0);
-//     get_vvar_data!(KERNEL_SCHEDULER).store(
-//         USER_SCHEDULER.get().unwrap() as *const Scheduler as *mut Scheduler,
-//         Ordering::Release,
-//     );
+/// 在用户态调用的调度器初始化接口，每个用户进程初始化一次。
+///
+/// 该函数不会切换任务。初始化完成后若需切换任务，则需再调用`reschedule`函数。
+#[unsafe(no_mangle)]
+pub extern "C" fn user_init() {
+    // 初始化内核态未初始化的，调度器的`sources`字段。
+    Scheduler::init_sources(&USER_SCHEDULER);
 
-//     // 初始化CURRENT_TASK
-//     get_vvar_data!(CURRENT_TASK)[SMPVirtImpl::cpu_id()]
-//         .store(init_task_ptr as *mut (), Ordering::Release);
-
-//     // 初始化IN_KERNEL
-//     get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].store(true, Ordering::Release);
-
-//     // 初始化CURRENT_VSPACE
-//     get_vvar_data!(CURRENT_VSPACE)[SMPVirtImpl::cpu_id()].store(0, Ordering::Release);
-
-//     // PROCESS_INFO_TABLE无需初始化，因为其默认值已经包含了一个有效的内核进程。
-
-//     // 内核态不需要初始化STACK_HANDLER，但需初始化KERNEL_STACKS中的current_stack
-//     get_vvar_data!(KERNEL_STACKS).lock().current_stack[SMPVirtImpl::cpu_id()] =
-//         Some(StackWapper::from_raw(init_stack_base as usize));
-// }
+    // 用户态不需要初始化CURRENT_TASK、IN_KERNEL、STACK_HANDLER和CURRENT_VSPACE，因为它们在内核态切换到用户态任务时会被正确设置。
+    // （TODO: 真的吗？）
+}

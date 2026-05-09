@@ -1,6 +1,6 @@
 // 全局进程数组，及每个进程在数组中存储的信息
 
-use crate::interface::PROCESS_NUM;
+use crate::{interface::PROCESS_NUM, schedule::scheduler::Scheduler};
 use core::sync::atomic::{AtomicBool, AtomicIsize, AtomicPtr, AtomicUsize, Ordering};
 use heapless::Vec;
 
@@ -39,6 +39,9 @@ pub(crate) struct ProcessInfo {
     ///
     /// 地址空间指针可以为空，这代表该进程可以在所有地址空间下运行，目前应该只有单页表情况下的内核进程符合该条件。
     pub(crate) vspace: AtomicPtr<*mut ()>,
+    /// 调度器，用于内核访问其它进程的调度器。因此指针为内核空间中的地址。
+    /// 用户态访问调度器直接通过USER_SCHEDULER访问。
+    pub(crate) scheduler: AtomicPtr<Scheduler>,
 }
 
 impl Default for ProcessInfoTable {
@@ -50,6 +53,7 @@ impl Default for ProcessInfoTable {
                     valid: AtomicBool::new(false),
                     highest_prio: AtomicIsize::new(isize::MAX),
                     vspace: AtomicPtr::new(core::ptr::null_mut()),
+                    scheduler: AtomicPtr::new(core::ptr::null_mut()),
                 }
             }; PROCESS_NUM],
             next_i: AtomicUsize::new(1),
