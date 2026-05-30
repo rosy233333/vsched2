@@ -1,39 +1,6 @@
-use crate::{
-    get_sp,
-    interface::{SMPVirtImpl, Stack, StackVirtImpl, CPU_NUM, SMP, STACK_POOL_SIZE},
-    main_loop::{run_coroutine, run_thread},
-    switch_sp_tratrampoline,
-};
-use heapless::vec::Vec;
+use crate::interface::{SMPVirtImpl, Stack, StackVirtImpl, CPU_NUM, SMP, STACK_POOL_SIZE};
+use heapless::Vec;
 
-/// 获取栈类型，即是否是空栈
-///
-/// 如果返回 0，表示是空栈，否则表示栈使用的大小
-///
-/// TODO: 这里需要后续修改，用sp或fp判断栈类型不对（由于函数调用和局部变量，一定不等于栈顶）
-#[inline(always)]
-#[allow(dead_code)] // 之后再看要不要删掉
-fn get_stack_type(stack_base: usize) -> usize {
-    get_sp!() - stack_base
-}
-
-#[no_mangle]
-#[unsafe(naked)]
-pub(crate) unsafe extern "C" fn coroutine_trampoline() -> ! {
-    switch_sp_tratrampoline!(run_coroutine)
-}
-
-#[no_mangle]
-#[unsafe(naked)]
-pub(crate) unsafe extern "C" fn thread_trampoline() -> ! {
-    switch_sp_tratrampoline!(run_thread)
-}
-
-// #[no_mangle]
-// #[unsafe(naked)]
-// unsafe extern "C" fn coroutine_into_user_trampoline() -> ! {
-//     switch_sp_tratrampoline!(run_coroutine_into_user)
-// }
 /// 对栈进行封装
 ///
 /// 用来储存栈基址，后续可以加入新的内容。通过调用 alloc 和 dealloc 接口进行栈的分配和回收
