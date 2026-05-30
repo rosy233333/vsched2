@@ -1,6 +1,9 @@
 //! 就绪队列，实现为一个事件源
 
-use core::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
+use core::{
+    ops::Shl,
+    sync::atomic::{AtomicIsize, AtomicU64, Ordering},
+};
 
 use heapless::{mpmc::Queue, BinaryHeap, Deque};
 use spin::mutex::Mutex;
@@ -56,7 +59,7 @@ impl ReadyQueue {
 impl EventSource for ReadyQueue {
     fn hightest_priority(&self, _cpu_id: usize) -> isize {
         let bitmap = self.prio_bitmap.load(Ordering::Acquire);
-        let highest_one = bitmap.highest_one().map_or(-1, |i| i as isize);
+        let highest_one = highest_one(bitmap).map_or(-1, |i| i as isize);
         63 + HIGHEST_PRIORITY - highest_one
     }
 
@@ -74,7 +77,7 @@ impl EventSource for ReadyQueue {
                         .fetch_and(!(1 << (63 - prio + HIGHEST_PRIORITY)), Ordering::AcqRel);
                     // 再次检查队列为空，避免期间队列中插入了任务，但在位图上的置位被上文的fetch_and覆盖
                     if queue.lock().is_empty() {
-                        let highest_one = new_bitmap.highest_one().map_or(-1, |i| i as isize);
+                        let highest_one = highest_one(new_bitmap).map_or(-1, |i| i as isize);
                         63 + HIGHEST_PRIORITY - highest_one
                     } else {
                         self.prio_bitmap
@@ -89,5 +92,21 @@ impl EventSource for ReadyQueue {
             prio += 1;
         }
         (core::ptr::null(), prio)
+    }
+}
+
+fn highest_one(mut i: u64) -> Option<u32> {
+    let mut shl_num = 0;
+    for _ in 0..64 {
+        if i & 0x8000_0000_0000_0000 != 0 {
+            break;
+        }
+        shl_num += 1;
+        i = i.shl(1);
+    }
+    if shl_num == 64 {
+        None
+    } else {
+        Some(63 - shl_num)
     }
 }

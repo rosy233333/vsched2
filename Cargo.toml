@@ -8,12 +8,12 @@ edition = "2021"
 [dependencies]
 vdso_helper = { git = "https://github.com/rosy233333/vdso_crate_template.git" }
 # vdso_helper = { path = "../vdso_crate_template/vdso_helper" }
+heapless = { git = "https://github.com/rosy233333/heapless.git", branch = "0.9.0" }
 spin = { version = "0.10", default-features = false, features = [
     "spin_mutex",
     "rwlock",
 ] }
 lazyinit = "0.2.2"
-heapless = { git = "https://github.com/rosy233333/heapless.git" }
 # pinned-init = "0.0.10"
 
 [build_dependencies]

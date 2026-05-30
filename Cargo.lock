@@ -70,8 +70,8 @@ dependencies = [
 
 [[package]]
 name = "heapless"
-version = "0.9.1"
-source = "git+https://github.com/rosy233333/heapless.git#686886fa5dc89ecb1030c91590f2c9de80165fc7"
+version = "0.9.0"
+source = "git+https://github.com/rosy233333/heapless.git?branch=0.9.0#e25784ce66d0d7973b02b32c700d344e036fa857"
 dependencies = [
  "hash32",
  "stable_deref_trait",

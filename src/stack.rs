@@ -18,19 +18,19 @@ fn get_stack_type(stack_base: usize) -> usize {
 }
 
 #[no_mangle]
-#[unsafe(naked)]
+#[naked]
 pub(crate) unsafe extern "C" fn coroutine_trampoline() -> ! {
     switch_sp_tratrampoline!(run_coroutine)
 }
 
 #[no_mangle]
-#[unsafe(naked)]
+#[naked]
 pub(crate) unsafe extern "C" fn thread_trampoline() -> ! {
     switch_sp_tratrampoline!(run_thread)
 }
 
 // #[no_mangle]
-// #[unsafe(naked)]
+// #[naked]
 // unsafe extern "C" fn coroutine_into_user_trampoline() -> ! {
 //     switch_sp_tratrampoline!(run_coroutine_into_user)
 // }
