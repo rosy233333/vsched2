@@ -43,7 +43,7 @@ pub extern "C" fn kernel_init_main(init_stack_base: *const (), init_task_ptr: *c
 
     // 内核态不需要初始化STACK_HANDLER，但需初始化KERNEL_STACKS中的current_stack
     get_vvar_data!(KERNEL_STACKS).lock().current_stack[SMPVirtImpl::cpu_id()] =
-        Some(StackWapper::from_raw(init_stack_base as usize));
+        Some(StackWapper::from_raw_init(init_stack_base as usize));
 }
 
 /// 在内核的副核心调用的调度器初始化接口。
@@ -74,7 +74,7 @@ pub extern "C" fn kernel_init_secondary(init_stack_base: *const (), init_task_pt
 
     // 内核态不需要初始化STACK_HANDLER，但需初始化KERNEL_STACKS中的current_stack
     get_vvar_data!(KERNEL_STACKS).lock().current_stack[SMPVirtImpl::cpu_id()] =
-        Some(StackWapper::from_raw(init_stack_base as usize));
+        Some(StackWapper::from_raw_init(init_stack_base as usize));
 }
 
 /// 在内核态调用的进程初始化接口，每个用户进程初始化一次。

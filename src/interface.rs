@@ -62,6 +62,8 @@ trait_interface! {
         /// 分配栈
         fn alloc() -> *mut ();
         /// 回收栈
+        /// 
+        /// 调度器模块保证不会回收初始栈。
         fn dealloc(stack: *mut ());
     }
 }

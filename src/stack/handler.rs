@@ -16,22 +16,39 @@ use heapless::Vec;
 pub struct StackWapper {
     /// 栈基址
     pub base: usize,
+    /// 是否是初始栈（不能被释放）
+    pub is_init: bool,
 }
 
 impl StackWapper {
     /// 分配一个新的栈
     pub fn new() -> Self {
         let base = StackVirtImpl::alloc() as usize;
-        Self { base }
+        Self {
+            base,
+            is_init: false,
+        }
     }
 
     /// 从一个已有的栈中获取一个新实例
     pub fn from_raw(base: usize) -> Self {
-        Self { base }
+        Self {
+            base,
+            is_init: false,
+        }
+    }
+
+    /// 根据栈底创建新的初始栈实例
+    pub fn from_raw_init(base: usize) -> Self {
+        Self {
+            base,
+            is_init: true,
+        }
     }
 
     /// 回收栈
     pub fn dealloc(self) {
+        assert!(!self.is_init);
         StackVirtImpl::dealloc(self.base as *mut ());
     }
 }
@@ -45,13 +62,19 @@ impl StackWapper {
 
 impl Default for StackWapper {
     fn default() -> Self {
-        Self { base: 0 }
+        Self {
+            base: 0,
+            is_init: false,
+        }
     }
 }
 
 impl From<usize> for StackWapper {
     fn from(base: usize) -> Self {
-        Self { base }
+        Self {
+            base,
+            is_init: false,
+        }
     }
 }
 
@@ -96,8 +119,25 @@ impl StackHandler {
 
     pub fn dealloc_stack(&mut self, stack: StackWapper) {
         self.free_stacks.push(stack).unwrap_or_else(|stack| {
-            // 如果栈池已满，则回收栈
-            stack.dealloc();
+            if stack.is_init {
+                // 从栈池中回收一个非is_init的栈，然后将传入的栈放入栈池
+                let mut success = false;
+                for free_stack in self.free_stacks.iter_mut() {
+                    if !free_stack.is_init {
+                        let old_stack = core::mem::replace(free_stack, stack);
+                        old_stack.dealloc();
+                        success = true;
+                        break;
+                    }
+                }
+                assert!(
+                    success,
+                    "Error: Failed to dealloc stack because the stack pool is full of init stacks"
+                );
+            } else {
+                // 如果栈池已满，则回收栈
+                stack.dealloc();
+            }
         });
     }
 
