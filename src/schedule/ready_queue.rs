@@ -1,8 +1,8 @@
 //! 就绪队列，实现为一个事件源
 
-use core::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU64, Ordering};
 
-use heapless::{mpmc::Queue, BinaryHeap, Deque};
+use heapless::Deque;
 use spin::mutex::Mutex;
 
 use crate::{
@@ -11,6 +11,19 @@ use crate::{
 };
 
 const PRIORITY_LEVELS: usize = (LOWEST_PRIORITY - HIGHEST_PRIORITY) as usize + 1;
+
+fn highest_one(bitmap: u64) -> Option<usize> {
+    let mut index = 63;
+    loop {
+        if bitmap & (1u64 << index) != 0 {
+            return Some(index);
+        }
+        if index == 0 {
+            return None;
+        }
+        index -= 1;
+    }
+}
 
 pub(crate) struct ReadyQueue {
     /// index = priority - HIGHEST_PRIORITY
@@ -56,8 +69,8 @@ impl ReadyQueue {
 impl EventSource for ReadyQueue {
     fn hightest_priority(&self, _cpu_id: usize) -> isize {
         let bitmap = self.prio_bitmap.load(Ordering::Acquire);
-        let highest_one = bitmap.highest_one().map_or(-1, |i| i as isize);
-        63 + HIGHEST_PRIORITY - highest_one
+        let highest_one_index = highest_one(bitmap).map_or(-1, |i| i as isize);
+        63 + HIGHEST_PRIORITY - highest_one_index
     }
 
     fn take_task(&self, _cpu_id: usize) -> (*const (), isize) {
@@ -74,8 +87,8 @@ impl EventSource for ReadyQueue {
                         .fetch_and(!(1 << (63 - prio + HIGHEST_PRIORITY)), Ordering::AcqRel);
                     // 再次检查队列为空，避免期间队列中插入了任务，但在位图上的置位被上文的fetch_and覆盖
                     if queue.lock().is_empty() {
-                        let highest_one = new_bitmap.highest_one().map_or(-1, |i| i as isize);
-                        63 + HIGHEST_PRIORITY - highest_one
+                        let highest_one_index = highest_one(new_bitmap).map_or(-1, |i| i as isize);
+                        63 + HIGHEST_PRIORITY - highest_one_index
                     } else {
                         self.prio_bitmap
                             .fetch_or(1 << (63 - prio + HIGHEST_PRIORITY), Ordering::AcqRel);
