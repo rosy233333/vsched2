@@ -90,7 +90,7 @@ trait_interface! {
         /// 从被trap的任务中获取trap信息
         ///
         /// 传入的任务一定是被trap的任务，因此具有trap上下文类型的寄存器上下文。
-        fn from_task(task: *const ()) -> &'static Self;
+        fn from_task(task: *const ()) -> *const Self;
         /// 处理trap。参数为被trap的任务。
         /// 当被trap的任务与trap处理无关时（例如外部中断），参数为None。
         fn handle(&self, task: Option<*const ()>);

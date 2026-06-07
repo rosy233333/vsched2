@@ -56,7 +56,7 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 // trap处理需要传入任务
                 scheduler
                     .push_trap(
-                        TrapInfoVirtImpl::from_task(current_task.to_ptr()),
+                        unsafe { &*TrapInfoVirtImpl::from_task(current_task.to_ptr()) },
                         Some(current_task),
                         SMPVirtImpl::cpu_id(),
                     )
@@ -85,7 +85,7 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 // 外部中断处理不需要传入任务
                 scheduler
                     .push_trap(
-                        TrapInfoVirtImpl::from_task(current_task.to_ptr()),
+                        unsafe { &*TrapInfoVirtImpl::from_task(current_task.to_ptr()) },
                         None,
                         SMPVirtImpl::cpu_id(),
                     )
