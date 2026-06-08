@@ -191,12 +191,6 @@ pub extern "C" fn current_vspace() -> usize {
     get_vvar_data!(CURRENT_VSPACE)[SMPVirtImpl::cpu_id()].load(Ordering::Acquire)
 }
 
-/// 获取阻塞于trap上的任务
-#[unsafe(no_mangle)]
-pub extern "C" fn get_trap_blocked_task() -> Option<*const ()> {
-    todo!()
-}
-
 /// 在trap处理任务中运行的函数。
 ///
 /// OS需在`TrapInfo::new_handler`的实现中，用这个函数创建trap处理任务。
@@ -204,4 +198,18 @@ pub extern "C" fn get_trap_blocked_task() -> Option<*const ()> {
 #[unsafe(no_mangle)]
 pub extern "C" fn trap_handler(queue: *const ()) {
     crate::schedule::trap_wait_queue::trap_handler(queue);
+}
+
+/// 获取当前任务指针
+///
+/// 可能未初始化，此时会返回空指针。
+#[unsafe(no_mangle)]
+pub extern "C" fn current_task_ptr() -> *const () {
+    get_vvar_data!(CURRENT_TASK)[SMPVirtImpl::cpu_id()].load(Ordering::Acquire)
+}
+
+/// 设置当前任务指针，返回之前的值。
+#[unsafe(no_mangle)]
+pub extern "C" fn set_current_task_ptr(task: *const ()) -> *const () {
+    get_vvar_data!(CURRENT_TASK)[SMPVirtImpl::cpu_id()].swap(task as *mut (), Ordering::AcqRel)
 }
