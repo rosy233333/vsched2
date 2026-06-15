@@ -90,6 +90,9 @@ pub(crate) fn set_current_task(task: &'static TaskVirtImpl) {
 }
 
 /// 当前进程的调度器，实现为非perCPU的私有数据
+///
+/// 使用映射到用户态的vDSO时，该变量为用户态调度器；
+/// 使用映射到内核态的vDSO时，该变量为内核态调度器。
 pub(crate) static USER_SCHEDULER: LazyInit<Scheduler> = LazyInit::new();
 
 /// 当前进程的栈池，实现为非perCPU的私有数据。

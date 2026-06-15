@@ -152,7 +152,7 @@ pub extern "C" fn user_init() {
 ///
 /// 返回值表示是否成功放入。
 #[unsafe(no_mangle)]
-pub extern "C" fn push_task_into_current(task: *const (), pid: usize) -> bool {
+pub extern "C" fn push_task_into_current(task: *const ()) -> bool {
     let scheduler = USER_SCHEDULER.get().unwrap();
     unsafe { scheduler.push_task(TaskVirtImpl::from_ptr(task)).is_ok() }
 }
