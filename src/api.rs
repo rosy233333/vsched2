@@ -22,6 +22,11 @@ use crate::{
 /// - `init_task_ptr`：内核初始化执行流（当前执行流）所属的任务指针。需要内核先创建该任务，再将其指针传入该函数中。
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_init_main(init_stack: *mut (), init_task_ptr: *const ()) {
+    let cpu_id = SMPVirtImpl::cpu_id();
+
+    // 初始化CURRENT_TASK
+    get_vvar_data!(CURRENT_TASK)[cpu_id].store(init_task_ptr as *mut (), Ordering::Release);
+
     // 调度器初始化，虽然名称是USER_SCHEDULER，但它是内核调度器的实例，且在内核空间中存储和使用。
     Scheduler::init(unsafe { Pin::new_unchecked(&USER_SCHEDULER) }, 0);
     get_vvar_data!(KERNEL_SCHEDULER).store(
@@ -29,20 +34,16 @@ pub extern "C" fn kernel_init_main(init_stack: *mut (), init_task_ptr: *const ()
         Ordering::Release,
     );
 
-    // 初始化CURRENT_TASK
-    get_vvar_data!(CURRENT_TASK)[SMPVirtImpl::cpu_id()]
-        .store(init_task_ptr as *mut (), Ordering::Release);
-
     // 初始化IN_KERNEL
-    get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].store(true, Ordering::Release);
+    get_vvar_data!(IN_KERNEL)[cpu_id].store(true, Ordering::Release);
 
     // 初始化CURRENT_VSPACE
-    get_vvar_data!(CURRENT_VSPACE)[SMPVirtImpl::cpu_id()].store(0, Ordering::Release);
+    get_vvar_data!(CURRENT_VSPACE)[cpu_id].store(0, Ordering::Release);
 
     // PROCESS_INFO_TABLE无需初始化，因为其默认值已经包含了一个有效的内核进程。
 
     // 内核态不需要初始化STACK_HANDLER，但需初始化KERNEL_STACKS中的current_stack
-    get_vvar_data!(KERNEL_STACKS).lock().current_stack[SMPVirtImpl::cpu_id()] =
+    get_vvar_data!(KERNEL_STACKS).lock().current_stack[cpu_id] =
         Some(unsafe { StackVirtImpl::from_mut(init_stack) });
 }
 

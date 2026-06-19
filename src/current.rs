@@ -30,7 +30,7 @@ vvar_data! {
     /// 内核调度器的全局实例，实现为非perCPU的共享数据。
     ///
     /// 指针指向存放在内核空间的调度器实例，用于防止在用户态访问内核态调度器。
-    KERNEL_SCHEDULER: LazyInit<AtomicPtr<Scheduler>>,
+    KERNEL_SCHEDULER: AtomicPtr<Scheduler>,
     /// 当前位于用户态或内核态，实现为perCPU的共享数据。
     ///
     /// ## 设置`IN_KERNEL`的时机
