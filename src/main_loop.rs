@@ -170,7 +170,6 @@ pub extern "C" fn kschedule() -> usize {
     push_prev_task(scheduler);
     loop {
         let next_pid = process_schedule(scheduler);
-
         let res = ktask_schedule(next_pid);
         if res != 2 {
             break res;
@@ -244,14 +243,15 @@ fn switch_vspace(vspace_pid: usize) {
 /// 将上一任务放回调度器
 fn push_prev_task(current_scheduler: &Scheduler) {
     let current_task = get_current_task();
-    if current_task.state() == TaskState::Ready {
+    let state = current_task.state();
+    if state == TaskState::Ready {
         match current_scheduler.push_task(current_task) {
             Ok(()) => (),
             Err(task) => {
                 panic!("Failed to push task back to scheduler: {:?}", task.to_ptr());
             }
         };
-    } else if current_task.state() == TaskState::Exited {
+    } else if state == TaskState::Exited {
         current_task.dealloc();
     }
 }

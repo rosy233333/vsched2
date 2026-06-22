@@ -79,25 +79,39 @@ impl EventSource for ReadyQueue {
         let mut prio = HIGHEST_PRIORITY;
         while prio <= LOWEST_PRIORITY {
             let queue = &self.queues[(prio - HIGHEST_PRIORITY) as usize];
-            if let Some(task) = queue.lock().pop_front() {
+            let res = queue.lock().pop_front();
+            if let Some(task) = res {
                 // 更新优先级
-                let next_prio = if queue.lock().is_empty() {
+                // TODO: 这里反正用了锁，可以把检查两次改成一直持有锁
+                // let next_prio = if queue.lock().is_empty() {
+                //     let new_bitmap = self
+                //         .prio_bitmap
+                //         .fetch_and(!(1 << (63 - prio + HIGHEST_PRIORITY)), Ordering::AcqRel);
+                //     // 再次检查队列为空，避免期间队列中插入了任务，但在位图上的置位被上文的fetch_and覆盖
+                //     if queue.lock().is_empty() {
+                //         let highest_one_index = highest_one(new_bitmap).map_or(-1, |i| i as isize);
+                //         63 + HIGHEST_PRIORITY - highest_one_index
+                //     } else {
+                //         self.prio_bitmap
+                //             .fetch_or(1 << (63 - prio + HIGHEST_PRIORITY), Ordering::AcqRel);
+                //         prio
+                //     }
+                // } else {
+                //     prio
+                // };
+                let guard = queue.lock();
+                let next_prio = if guard.is_empty() {
                     let new_bitmap = self
                         .prio_bitmap
                         .fetch_and(!(1 << (63 - prio + HIGHEST_PRIORITY)), Ordering::AcqRel);
-                    // 再次检查队列为空，避免期间队列中插入了任务，但在位图上的置位被上文的fetch_and覆盖
-                    if queue.lock().is_empty() {
-                        let highest_one_index = highest_one(new_bitmap).map_or(-1, |i| i as isize);
-                        63 + HIGHEST_PRIORITY - highest_one_index
-                    } else {
-                        self.prio_bitmap
-                            .fetch_or(1 << (63 - prio + HIGHEST_PRIORITY), Ordering::AcqRel);
-                        prio
-                    }
+                    let highest_one_index = highest_one(new_bitmap).map_or(-1, |i| i as isize);
+                    63 + HIGHEST_PRIORITY - highest_one_index
                 } else {
                     prio
                 };
+                drop(guard);
                 return (task.to_ptr(), next_prio);
+            } else {
             }
             prio += 1;
         }

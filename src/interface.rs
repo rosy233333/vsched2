@@ -52,6 +52,8 @@ trait_interface! {
         /// 设置协程运行返回值
         fn set_return_value(&self, value: isize);
         /// 释放一个已经退出的任务
+        ///
+        /// 如果要提供对任务join的支持，则该函数中还需实现通知等待该任务退出的任务的机制。
         fn dealloc(&self);
     }
 }

@@ -158,6 +158,39 @@ pub extern "C" fn push_task_into_current(task: *const ()) -> bool {
     unsafe { scheduler.push_task(TaskVirtImpl::from_ptr(task)).is_ok() }
 }
 
+/// 将任务放入它所属的就绪队列。
+///
+/// 因为涉及到对其它地址空间的就绪队列的操作，因此只能在内核调用。
+///
+/// task指针指向实现了`Task` trait的类型。
+///
+/// 返回值表示是否成功放入。
+#[unsafe(no_mangle)]
+pub extern "C" fn push_task(task: *const ()) -> bool {
+    let task = unsafe { TaskVirtImpl::from_ptr(task) };
+    let scheduler = if task.is_kernel() {
+        USER_SCHEDULER.get().unwrap() // 在内核，USER_SCHEDULER代表内核调度器
+    } else {
+        // 获取任务pid对应的用户态调度器
+        let pid = task.pid();
+        if get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
+            .valid
+            .load(Ordering::Acquire)
+            == false
+        {
+            return false;
+        }
+        let ptr = get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
+            .scheduler
+            .load(Ordering::Acquire);
+        if ptr.is_null() {
+            return false;
+        }
+        unsafe { &*ptr }
+    };
+    scheduler.push_task(task).is_ok()
+}
+
 /// 将任务放入pid指定的进程的就绪队列。只能在内核调用。
 ///
 /// task指针指向实现了`Task` trait的类型。
@@ -225,10 +258,11 @@ pub extern "C" fn take_current_stack() -> *mut () {
     let cpu_id = SMPVirtImpl::cpu_id();
     // 此处使用任务特权级而非当前特权级，这样才能获取与任务对应的栈。
     if get_current_task().is_kernel() {
-        get_vvar_data!(KERNEL_STACKS)
+        let res = get_vvar_data!(KERNEL_STACKS)
             .lock()
             .take_current_stack(cpu_id)
-            .to_mut()
+            .to_mut();
+        res
     } else {
         STACK_HANDLER.lock().take_current_stack(cpu_id).to_mut()
     }

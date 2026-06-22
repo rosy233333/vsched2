@@ -238,7 +238,7 @@ impl Scheduler {
             return (None, isize::MAX);
         }
 
-        let (task, new_prio) = (sources[first_index].1.take_task)(sources[first_index].0, cpu_id);
+        let (task, new_prio) = (sources[first_index].1.take_task)(sources[first_index].0, cpu_id); // 这句有问题
         if task.is_null() {
             assert!(new_prio == first_prio);
             (None, new_prio)

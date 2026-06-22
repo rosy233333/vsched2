@@ -98,7 +98,8 @@ pub(crate) fn trap_handler(queue: *const ()) {
     // let cpuid = SMPVirtImpl::cpu_id();
     // let queue = &self.queues[cpuid];
     loop {
-        if let Some((trap_info, task)) = queue.lock().pop_front() {
+        let res = queue.lock().pop_front();
+        if let Some((trap_info, task)) = res {
             // 处理trap
             // self.trap_count
             //     .fetch_sub(1, core::sync::atomic::Ordering::AcqRel);

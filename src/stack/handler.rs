@@ -96,20 +96,20 @@ pub struct StackHandler {
 }
 
 impl StackHandler {
-    /// 创建一个新的栈管理器
-    pub(crate) fn new() -> Self {
-        let mut stacks = Vec::new();
-        for _ in 0..STACK_POOL_SIZE - CPU_NUM {
-            stacks
-                .push(unsafe { StackVirtImpl::from_mut(StackVirtImpl::alloc()) })
-                .expect("failed to create new stack");
-        }
-        Self {
-            free_stacks: stacks,
-            current_stack: [Some(unsafe { StackVirtImpl::from_mut(StackVirtImpl::alloc()) });
-                CPU_NUM],
-        }
-    }
+    // /// 创建一个新的栈管理器
+    // pub(crate) fn new() -> Self {
+    //     let mut stacks = Vec::new();
+    //     for _ in 0..STACK_POOL_SIZE - CPU_NUM {
+    //         stacks
+    //             .push(unsafe { StackVirtImpl::from_mut(StackVirtImpl::alloc()) })
+    //             .expect("failed to create new stack");
+    //     }
+    //     Self {
+    //         free_stacks: stacks,
+    //         current_stack: [Some(unsafe { StackVirtImpl::from_mut(StackVirtImpl::alloc()) });
+    //             CPU_NUM],
+    //     }
+    // }
 
     pub(crate) fn alloc_stack(&mut self) -> &'static mut StackVirtImpl {
         self.free_stacks.pop().unwrap_or_else(|| {
