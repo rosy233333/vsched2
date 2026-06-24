@@ -412,7 +412,10 @@ pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
         //     core::arch::asm!("call thread_trampoline", in("a0") thread_stack, in("a1") ret_addr, options(noreturn));
         // }
         let thread_stack_base = unsafe { StackVirtImpl::from_mut(thread_stack) }.base();
-        jump_to_trampoline!(thread_trampoline, thread_stack_base);
+        // jump_to_trampoline!(thread_trampoline, thread_stack_base);
+        unsafe {
+            run_thread();
+        }
     }
     unreachable!();
 }
