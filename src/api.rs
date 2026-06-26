@@ -107,9 +107,9 @@ pub extern "C" fn process_init(vspace_ptr: *mut *mut ()) -> usize {
     get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
         .vspace
         .store(vspace_ptr, Ordering::Release);
-    get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
-        .highest_prio
-        .store(isize::MAX, Ordering::Release);
+    // get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
+    //     .highest_prio
+    //     .store(isize::MAX, Ordering::Release);
 
     // 初始化用户态vDSO私有数据。
     // 需要在此处初始化的原因是需要初始化进程调度器，之后才能将该进程的任务放入调度器中。

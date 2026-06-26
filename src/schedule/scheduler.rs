@@ -1,11 +1,12 @@
 //! 调度器
 
-use core::{marker::PhantomPinned, pin::Pin};
+use core::{marker::PhantomPinned, pin::Pin, sync::atomic::Ordering};
 
 use heapless::Vec;
 use lazyinit::LazyInit;
 // use pinned_init::{pin_data, pin_init, PinInit};
 use spin::rwlock::RwLock;
+use vdso_helper::get_vvar_data;
 
 use super::event_source::{EventSource, EventSourceVtable};
 use crate::{
@@ -111,6 +112,7 @@ impl Scheduler {
                 ReadyQueue::vtable(),
             ))
             .unwrap();
+        self_ref.get_and_update_prio();
     }
 
     /// 初始化调度器实例的`sources`以外的字段。
@@ -155,6 +157,7 @@ impl Scheduler {
                 ReadyQueue::vtable(),
             ))
             .unwrap();
+        self_ref.get_and_update_prio();
     }
 
     /// 注册事件源
@@ -180,7 +183,12 @@ impl Scheduler {
         } else {
             (len + index) as usize
         };
-        sources.insert(insert_index, (event_source, vtable)).is_ok()
+        if sources.insert(insert_index, (event_source, vtable)).is_ok() {
+            self.get_and_update_prio();
+            true
+        } else {
+            false
+        }
     }
 
     /// 取消注册事件源，返回是否成功取消
@@ -188,6 +196,7 @@ impl Scheduler {
         let mut sources = self.sources.write();
         if let Some(index) = sources.iter().position(|(ptr, _)| *ptr == event_source) {
             sources.remove(index);
+            self.get_and_update_prio();
             true
         } else {
             false
@@ -235,6 +244,7 @@ impl Scheduler {
             );
 
         if first_index == usize::MAX {
+            self.update_prio(isize::MAX);
             return (None, isize::MAX);
         }
 
@@ -262,7 +272,11 @@ impl Scheduler {
         &self,
         task: &'static TaskVirtImpl,
     ) -> Result<(), &'static TaskVirtImpl> {
-        self.ready_queue.push_task(task)
+        let res = self.ready_queue.push_task(task);
+        if res.is_ok() {
+            self.get_and_update_prio();
+        }
+        res
     }
 
     /// 将一个trap信息和一个可选的被trap的任务放入队列
@@ -272,6 +286,24 @@ impl Scheduler {
         task: Option<&'static TaskVirtImpl>,
         cpuid: usize,
     ) -> Result<(), (&'static TrapInfoVirtImpl, Option<&'static TaskVirtImpl>)> {
-        self.trap_wait_queue.push_trap(trap_info, task, cpuid)
+        let res = self.trap_wait_queue.push_trap(trap_info, task, cpuid);
+        if res.is_ok() {
+            self.get_and_update_prio();
+        }
+        res
+    }
+
+    /// 更新全局进程表中，本进程的优先级
+    #[inline]
+    pub(crate) fn update_prio(&self, prio: isize) {
+        get_vvar_data!(PROCESS_INFO_TABLE).table[self.global_index]
+            .highest_prio
+            .store(prio, Ordering::Release);
+    }
+
+    #[inline]
+    pub(crate) fn get_and_update_prio(&self) {
+        let prio = self.hightest_priority();
+        self.update_prio(prio);
     }
 }

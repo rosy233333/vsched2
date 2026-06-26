@@ -125,13 +125,13 @@ pub(crate) fn trap_handler(queue: *const ()) {
                 unsafe {
                     (*scheduler).push_task(task).unwrap();
                 }
-                // TODO: 这里真的需要更新一下吗？
-                if !task.is_kernel() {
-                    let new_prio = unsafe { (*scheduler).hightest_priority() };
-                    get_vvar_data!(PROCESS_INFO_TABLE).table[task.pid()]
-                        .highest_prio
-                        .store(new_prio, Ordering::Release);
-                }
+                // // TODO: 这里真的需要更新一下吗？
+                // if !task.is_kernel() {
+                //     let new_prio = unsafe { (*scheduler).hightest_priority() };
+                //     get_vvar_data!(PROCESS_INFO_TABLE).table[task.pid()]
+                //         .highest_prio
+                //         .store(new_prio, Ordering::Release);
+                // }
             }
         } else {
             // 没有trap，等待

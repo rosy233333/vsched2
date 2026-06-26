@@ -311,11 +311,11 @@ fn push_prev_task() {
 ///
 /// 返回值：下一个任务所在的进程id
 fn process_schedule(current_scheduler: &Scheduler) -> usize {
-    let prio = current_scheduler.hightest_priority();
+    // let prio = current_scheduler.hightest_priority();
     let pid = current_scheduler.global_index();
-    get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
-        .highest_prio
-        .store(prio, Ordering::Release);
+    // get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
+    //     .highest_prio
+    //     .store(prio, Ordering::Release);
     get_vvar_data!(PROCESS_INFO_TABLE).highest_prio_process(pid)
 }
 
@@ -335,9 +335,9 @@ fn ktask_schedule(next_pid: usize) -> usize {
         // 从当前调度器获取下一任务并运行
         let kscheduler = unsafe { &*get_vvar_data!(KERNEL_SCHEDULER).load(Ordering::Acquire) };
         if let (Some(next_task), new_prio) = kscheduler.pop_task() {
-            get_vvar_data!(PROCESS_INFO_TABLE).table[0]
-                .highest_prio
-                .store(new_prio, Ordering::Release);
+            // get_vvar_data!(PROCESS_INFO_TABLE).table[0]
+            //     .highest_prio
+            //     .store(new_prio, Ordering::Release);
             switch_vspace(next_task.pid());
             // next_task.set_state(TaskState::Running);
             set_current_task(next_task);
@@ -351,9 +351,9 @@ fn ktask_schedule(next_pid: usize) -> usize {
 
         let uscheduler = unsafe { get_user_data(&USER_SCHEDULER, None) };
         if let (Some(next_task), new_prio) = uscheduler.pop_task() {
-            get_vvar_data!(PROCESS_INFO_TABLE).table[next_pid]
-                .highest_prio
-                .store(new_prio, Ordering::Release);
+            // get_vvar_data!(PROCESS_INFO_TABLE).table[next_pid]
+            //     .highest_prio
+            //     .store(new_prio, Ordering::Release);
             // next_task.set_state(TaskState::Running);
             set_current_task(next_task);
             return 1; // 一定是用户态任务
@@ -378,9 +378,9 @@ fn utask_schedule(next_pid: usize, stack_status: usize) -> usize {
     if next_pid == current_pid {
         // 从当前调度器获取下一任务并运行
         if let (Some(next_task), new_prio) = uscheduler.pop_task() {
-            get_vvar_data!(PROCESS_INFO_TABLE).table[current_pid]
-                .highest_prio
-                .store(new_prio, Ordering::Release);
+            // get_vvar_data!(PROCESS_INFO_TABLE).table[current_pid]
+            //     .highest_prio
+            //     .store(new_prio, Ordering::Release);
             // next_task.set_state(TaskState::Running);
             set_current_task(next_task);
             return 0;
