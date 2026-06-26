@@ -73,8 +73,6 @@ trait_interface! {
         fn dealloc(&mut self);
         /// 栈底指针
         fn base(&self) -> *mut ();
-        /// 从base得到栈对象
-        fn from_base(base: *mut ()) -> *mut Self;
     }
 }
 

@@ -84,7 +84,7 @@ use heapless::Vec;
 //     }
 // }
 
-/// 用户态的栈池管理器
+/// 栈池管理器
 ///
 /// 管理栈的分配和回收，提供栈切换的接口
 #[derive(Debug)]
@@ -93,6 +93,8 @@ pub struct StackHandler {
     pub(crate) free_stacks: Vec<&'static mut StackVirtImpl, STACK_POOL_SIZE>,
     /// 当前使用的栈
     pub(crate) current_stack: [Option<&'static mut StackVirtImpl>; CPU_NUM],
+    /// 放入sscratch等寄存器中，供中断入口使用的栈
+    pub(crate) trap_stack: [Option<&'static mut StackVirtImpl>; CPU_NUM],
 }
 
 impl StackHandler {
@@ -157,6 +159,26 @@ impl StackHandler {
             .expect("Error: Failed to take current stack")
     }
 
+    /// 为每个核心分配`trap_stack`。
+    ///
+    /// 如果当前地址空间有处理trap的需求，则需在初始化时调用该函数。
+    ///
+    /// 否则，无需调用。
+    pub(crate) fn alloc_trap_stacks(&mut self) {
+        for i in 0..CPU_NUM {
+            let stack = self.alloc_stack();
+            let old = self.trap_stack[i].replace(stack);
+            assert!(old.is_none());
+        }
+    }
+
+    pub(crate) fn set_trap_stack(
+        &mut self,
+        stack: &'static mut StackVirtImpl,
+        cpu_id: usize,
+    ) -> Option<&'static mut StackVirtImpl> {
+        self.trap_stack[cpu_id].replace(stack)
+    }
     /// self切换到空栈，返回空栈的栈底。
     ///
     /// 对应黄色框部分
@@ -205,6 +227,7 @@ impl Default for StackHandler {
         Self {
             free_stacks: Vec::new(),
             current_stack: [None; CPU_NUM],
+            trap_stack: [None; CPU_NUM],
         }
     }
 }

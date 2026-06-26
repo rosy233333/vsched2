@@ -226,7 +226,6 @@ global_asm!(
     # - a1: 代表（trap后的）当前特权级，1为用户态，0为内核态。
     raw_trap_entry:
         mv s1, a1
-        mv s2, a2
         # `trap_entry`为`schedule_loop.rs`中的rust函数。
         # 参数：
         # - a0: trap类型，与os传入的参数格式相同。

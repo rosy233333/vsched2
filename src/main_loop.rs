@@ -44,7 +44,7 @@ use vdso_helper::{get_vvar_data, log::info};
 /// - 2: `uschedule`
 /// - 3: `utok_schedule`
 #[no_mangle]
-pub extern "C" fn trap_entry(trap_type: usize, privilege: usize, old_sscratch: usize) -> usize {
+pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
     match privilege {
         0 => get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].store(true, Ordering::Release),
         1 => get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].store(false, Ordering::Release),
@@ -54,20 +54,23 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize, old_sscratch: u
         // 普通同步 trap，进入 trap 处理流程。
         0 => {
             if privilege == 0 {
+                let cpu_id = SMPVirtImpl::cpu_id();
                 let mut stacks = get_vvar_data!(KERNEL_STACKS).lock();
-                info!("[trap_entry:sync] old_sscratch={:#x}", old_sscratch);
+                // info!("[trap_entry:sync] old_sscratch={:#x}", old_sscratch);
                 let new_stack = stacks.alloc_stack();
                 set_pre_stack!(new_stack.base());
                 // Recycle the old pre-save stack: set it as current_stack so
                 // run_task / krun_utask will reuse or dealloc it.
-                if old_sscratch != 0 {
-                    let old_vsi = StackVirtImpl::from_base(old_sscratch as *mut ());
-                    if !old_vsi.is_null() {
-                        let _old = stacks
-                            .set_current_stack(unsafe { &mut *old_vsi }, SMPVirtImpl::cpu_id());
-                        // info!("[trap_entry:sync] set_current_stack ok");
-                    }
-                }
+                // if old_sscratch != 0 {
+                //     let old_vsi = StackVirtImpl::from_base(old_sscratch as *mut ());
+                //     if !old_vsi.is_null() {
+                //         let _old = stacks
+                //             .set_current_stack(unsafe { &mut *old_vsi }, SMPVirtImpl::cpu_id());
+                //         // info!("[trap_entry:sync] set_current_stack ok");
+                //     }
+                // }
+                let current_stack = stacks.set_trap_stack(new_stack, cpu_id).unwrap();
+                let _old = stacks.set_current_stack(current_stack, cpu_id);
                 drop(stacks);
                 let current_task = get_current_task();
                 current_task.set_state(TaskState::Blocked);
@@ -78,7 +81,7 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize, old_sscratch: u
                     .push_trap(
                         unsafe { &*TrapInfoVirtImpl::from_task(current_task.to_ptr()) },
                         Some(current_task),
-                        SMPVirtImpl::cpu_id(),
+                        cpu_id,
                     )
                     .unwrap();
 
@@ -95,18 +98,23 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize, old_sscratch: u
         // 外部中断，将当前任务重新放回就绪态后进入对应调度器。
         1 => {
             if privilege == 0 {
+                let cpu_id = SMPVirtImpl::cpu_id();
                 let mut stacks = get_vvar_data!(KERNEL_STACKS).lock();
-                info!("[trap_entry:irq] old_sscratch={:#x}", old_sscratch);
+                // info!("[trap_entry:irq] old_sscratch={:#x}", old_sscratch);
                 let new_stack = stacks.alloc_stack();
                 set_pre_stack!(new_stack.base());
-                if old_sscratch != 0 {
-                    let old_vsi = StackVirtImpl::from_base(old_sscratch as *mut ());
-                    if !old_vsi.is_null() {
-                        let _old = stacks
-                            .set_current_stack(unsafe { &mut *old_vsi }, SMPVirtImpl::cpu_id());
-                        // info!("[trap_entry:irq] set_current_stack ok");
-                    }
-                }
+                // Recycle the old pre-save stack: set it as current_stack so
+                // run_task / krun_utask will reuse or dealloc it.
+                // if old_sscratch != 0 {
+                //     let old_vsi = StackVirtImpl::from_base(old_sscratch as *mut ());
+                //     if !old_vsi.is_null() {
+                //         let _old = stacks
+                //             .set_current_stack(unsafe { &mut *old_vsi }, SMPVirtImpl::cpu_id());
+                //         // info!("[trap_entry:irq] set_current_stack ok");
+                //     }
+                // }
+                let current_stack = stacks.set_trap_stack(new_stack, cpu_id).unwrap();
+                let _old = stacks.set_current_stack(current_stack, cpu_id);
                 drop(stacks);
 
                 let current_task = get_current_task();
@@ -453,7 +461,7 @@ pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
         // unsafe {
         //     core::arch::asm!("call thread_trampoline", in("a0") thread_stack, in("a1") ret_addr, options(noreturn));
         // }
-        let thread_stack_base = unsafe { StackVirtImpl::from_mut(thread_stack) }.base();
+        // let thread_stack_base = unsafe { StackVirtImpl::from_mut(thread_stack) }.base();
         // jump_to_trampoline!(thread_trampoline, thread_stack_base);
         unsafe {
             run_thread();

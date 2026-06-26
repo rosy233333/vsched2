@@ -26,6 +26,10 @@ pub extern "C" fn kernel_init_main(init_stack: *mut (), init_task_ptr: *const ()
 
     // 初始化CURRENT_TASK
     get_vvar_data!(CURRENT_TASK)[cpu_id].store(init_task_ptr as *mut (), Ordering::Release);
+    // info!(
+    //     "current task inited: {:#x}!",
+    //     get_vvar_data!(CURRENT_TASK)[cpu_id].load(Ordering::Acquire) as usize
+    // );
 
     // 调度器初始化，虽然名称是USER_SCHEDULER，但它是内核调度器的实例，且在内核空间中存储和使用。
     Scheduler::init(unsafe { Pin::new_unchecked(&USER_SCHEDULER) }, 0);
@@ -42,9 +46,11 @@ pub extern "C" fn kernel_init_main(init_stack: *mut (), init_task_ptr: *const ()
 
     // PROCESS_INFO_TABLE无需初始化，因为其默认值已经包含了一个有效的内核进程。
 
-    // 内核态不需要初始化STACK_HANDLER，但需初始化KERNEL_STACKS中的current_stack
-    get_vvar_data!(KERNEL_STACKS).lock().current_stack[cpu_id] =
-        Some(unsafe { StackVirtImpl::from_mut(init_stack) });
+    // 内核态不需要初始化STACK_HANDLER，但需初始化KERNEL_STACKS中的current_stack和trap_stacks
+    let mut stacks = get_vvar_data!(KERNEL_STACKS).lock();
+    stacks.current_stack[cpu_id] = Some(unsafe { StackVirtImpl::from_mut(init_stack) });
+    stacks.alloc_trap_stacks();
+    drop(stacks);
 
     info!("kernel_init_main complete!");
 }
