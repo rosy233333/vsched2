@@ -1,5 +1,6 @@
 use crate::interface::{SMPVirtImpl, Stack, StackVirtImpl, CPU_NUM, SMP, STACK_POOL_SIZE};
 use heapless::Vec;
+use vdso_helper::log::info;
 
 // /// 对栈进行封装
 // ///
@@ -150,26 +151,36 @@ impl StackHandler {
         stack: &'static mut StackVirtImpl,
         cpu_id: usize,
     ) -> Option<&'static mut StackVirtImpl> {
+        // info!("set current_stack: {:#x}", stack as *mut _ as usize);
         self.current_stack[cpu_id].replace(stack)
     }
 
     pub(crate) fn take_current_stack(&mut self, cpu_id: usize) -> &'static mut StackVirtImpl {
-        self.current_stack[cpu_id]
+        let stack = self.current_stack[cpu_id]
             .take()
-            .expect("Error: Failed to take current stack")
+            .expect("Error: Failed to take current stack");
+        // info!("take current_stack: {:#x}", stack as *mut _ as usize);
+        stack
     }
 
-    /// 为每个核心分配`trap_stack`。
+    /// 为当前核心分配trap栈并写入`trap_stack`变量中。
+    ///
+    /// 返回分配的栈基址，后续需要将其写入对应寄存器（如`sscratch`）中。
     ///
     /// 如果当前地址空间有处理trap的需求，则需在初始化时调用该函数。
     ///
     /// 否则，无需调用。
-    pub(crate) fn alloc_trap_stacks(&mut self) {
-        for i in 0..CPU_NUM {
-            let stack = self.alloc_stack();
-            let old = self.trap_stack[i].replace(stack);
-            assert!(old.is_none());
-        }
+    pub(crate) fn alloc_trap_stack(&mut self, cpu_id: usize) -> *mut () {
+        // for i in 0..CPU_NUM {
+        //     let stack = self.alloc_stack();
+        //     let old = self.trap_stack[i].replace(stack);
+        //     assert!(old.is_none());
+        // }
+        let stack = self.alloc_stack();
+        let base = stack.base();
+        let old = self.trap_stack[cpu_id].replace(stack);
+        assert!(old.is_none());
+        base
     }
 
     pub(crate) fn set_trap_stack(
@@ -212,7 +223,9 @@ impl StackHandler {
             if let Some(stack) = thread_stack {
                 self.set_current_stack(stack, SMPVirtImpl::cpu_id())
             } else {
-                self.current_stack[SMPVirtImpl::cpu_id()].take()
+                let stack = self.current_stack[SMPVirtImpl::cpu_id()].take();
+                // info!("take current_stack: {:#x?}", stack);
+                stack
             }
         };
         if let Some(old_stack) = old_stack {

@@ -6,6 +6,7 @@ use vdso_helper::{get_vvar_data, log::info};
 use crate::{
     current::{get_current_task, get_user_data, STACK_HANDLER, USER_SCHEDULER},
     schedule::scheduler::Scheduler,
+    set_pre_stack,
     stack::StackHandler,
     SMPVirtImpl, StackVirtImpl, Task, TaskVirtImpl, SMP,
 };
@@ -49,7 +50,12 @@ pub extern "C" fn kernel_init_main(init_stack: *mut (), init_task_ptr: *const ()
     // 内核态不需要初始化STACK_HANDLER，但需初始化KERNEL_STACKS中的current_stack和trap_stacks
     let mut stacks = get_vvar_data!(KERNEL_STACKS).lock();
     stacks.current_stack[cpu_id] = Some(unsafe { StackVirtImpl::from_mut(init_stack) });
-    stacks.alloc_trap_stacks();
+    // info!(
+    //     "set current_stack in kernel_init_main: {:#x}",
+    //     init_stack as usize
+    // );
+    let base = stacks.alloc_trap_stack(cpu_id);
+    set_pre_stack!(base);
     drop(stacks);
 
     info!("kernel_init_main complete!");
@@ -63,27 +69,33 @@ pub extern "C" fn kernel_init_main(init_stack: *mut (), init_task_ptr: *const ()
 ///
 /// 参数：
 ///
-/// - `init_stack_base`：内核初始化使用的栈（也就是当前栈）的`Stack`数据结构指针。
+/// - `init_stack`：内核初始化使用的栈（也就是当前栈）的`Stack`数据结构指针。
 /// - `init_task_ptr`：内核初始化执行流（当前执行流）所属的任务指针。需要内核先创建该任务，再将其指针传入该函数中。
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_init_secondary(init_stack: *mut (), init_task_ptr: *const ()) {
     // 不需初始化调度器，因为其已由`kernel_init_main`在主核心中初始化，并通过vDSO在所有核心中共享。
+    let cpu_id = SMPVirtImpl::cpu_id();
 
     // 初始化CURRENT_TASK
-    get_vvar_data!(CURRENT_TASK)[SMPVirtImpl::cpu_id()]
-        .store(init_task_ptr as *mut (), Ordering::Release);
+    get_vvar_data!(CURRENT_TASK)[cpu_id].store(init_task_ptr as *mut (), Ordering::Release);
 
     // 初始化IN_KERNEL
-    get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].store(true, Ordering::Release);
+    get_vvar_data!(IN_KERNEL)[cpu_id].store(true, Ordering::Release);
 
     // 初始化CURRENT_VSPACE
-    get_vvar_data!(CURRENT_VSPACE)[SMPVirtImpl::cpu_id()].store(0, Ordering::Release);
+    get_vvar_data!(CURRENT_VSPACE)[cpu_id].store(0, Ordering::Release);
 
     // PROCESS_INFO_TABLE无需初始化，因为其默认值已经包含了一个有效的内核进程。
 
     // 内核态不需要初始化STACK_HANDLER，但需初始化KERNEL_STACKS中的current_stack
-    get_vvar_data!(KERNEL_STACKS).lock().current_stack[SMPVirtImpl::cpu_id()] =
-        Some(unsafe { StackVirtImpl::from_mut(init_stack) });
+    let mut stacks = get_vvar_data!(KERNEL_STACKS).lock();
+    stacks.current_stack[cpu_id] = Some(unsafe { StackVirtImpl::from_mut(init_stack) });
+    // info!(
+    //     "set current_stack in kernel_init_secondary: {:#x}",
+    //     init_stack as usize
+    // );
+    let base = stacks.alloc_trap_stack(cpu_id);
+    set_pre_stack!(base);
 
     info!("kernel_init_secondary complete!");
 }
