@@ -1,6 +1,5 @@
 use crate::interface::{SMPVirtImpl, Stack, StackVirtImpl, CPU_NUM, SMP, STACK_POOL_SIZE};
-use heapless::Vec;
-use vdso_helper::log::info;
+use heapless::index_map::FnvIndexMap;
 
 // /// 对栈进行封装
 // ///
@@ -91,7 +90,7 @@ use vdso_helper::log::info;
 #[derive(Debug)]
 pub struct StackHandler {
     /// 空栈的集合
-    pub(crate) free_stacks: Vec<&'static mut StackVirtImpl, STACK_POOL_SIZE>,
+    pub(crate) free_stacks: FnvIndexMap<usize, &'static mut StackVirtImpl, STACK_POOL_SIZE>,
     /// 当前使用的栈
     pub(crate) current_stack: [Option<&'static mut StackVirtImpl>; CPU_NUM],
     /// 放入sscratch等寄存器中，供中断入口使用的栈
@@ -115,35 +114,20 @@ impl StackHandler {
     // }
 
     pub(crate) fn alloc_stack(&mut self) -> &'static mut StackVirtImpl {
-        self.free_stacks.pop().unwrap_or_else(|| {
-            // 如果没有空栈，则分配一个新的栈
+        if let Some((&addr, _)) = self.free_stacks.iter().next() {
+            self.free_stacks.remove(&addr).unwrap()
+        } else {
             unsafe { StackVirtImpl::from_mut(StackVirtImpl::alloc()) }
-        })
+        }
     }
 
     pub(crate) fn dealloc_stack(&mut self, stack: &'static mut StackVirtImpl) {
-        self.free_stacks.push(stack).unwrap_or_else(|stack| {
-            // if stack.is_init {
-            //     // 从栈池中回收一个非is_init的栈，然后将传入的栈放入栈池
-            //     let mut success = false;
-            //     for free_stack in self.free_stacks.iter_mut() {
-            //         if !free_stack.is_init {
-            //             let old_stack = core::mem::replace(free_stack, stack);
-            //             old_stack.dealloc();
-            //             success = true;
-            //             break;
-            //         }
-            //     }
-            //     assert!(
-            //         success,
-            //         "Error: Failed to dealloc stack because the stack pool is full of init stacks"
-            //     );
-            // } else {
-            //     // 如果栈池已满，则回收栈
-            //     stack.dealloc();
-            // }
-            stack.dealloc();
-        });
+        let addr = stack as *mut StackVirtImpl as usize;
+        self.free_stacks.remove(&addr);
+        match self.free_stacks.insert(addr, stack) {
+            Err((_, stack)) => stack.dealloc(),
+            Ok(_) => {},
+        }
     }
 
     pub(crate) fn set_current_stack(
@@ -238,7 +222,7 @@ impl Default for StackHandler {
     fn default() -> Self {
         // Self::new() 这样合适还是现在这样全0之后再初始化合适？
         Self {
-            free_stacks: Vec::new(),
+            free_stacks: FnvIndexMap::new(),
             current_stack: [None; CPU_NUM],
             trap_stack: [None; CPU_NUM],
         }

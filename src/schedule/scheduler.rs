@@ -30,9 +30,12 @@ pub(crate) struct Scheduler {
     ///
     /// `source`的`index=0`处一定为就绪队列。
     ///
-    /// 事件源的指针为用户空间中的地址，因此在内核中访问时需要经过地址转换。
-    // #[pin]
-    sources: RwLock<Vec<(*const (), EventSourceVtable), EVENT_SORCE_NUM>>,
+    /// 存储 (偏移量, vtable) 对，偏移量为事件源字段相对 Scheduler 结构体基址的字节偏移。
+    ///
+    /// 使用偏移量而非绝对指针，兼容双页表设计：
+    /// - 内核态通过 KVA 访问调度器时，self + offset 得到 KVA 事件源指针
+    /// - 用户态通过 UVA 访问调度器时，self + offset 得到 UVA 事件源指针
+    sources: RwLock<Vec<(usize, EventSourceVtable), EVENT_SORCE_NUM>>,
     /// 全局进程表中的索引，同时作为进程号使用
     ///
     /// 内核调度器固定为0
@@ -57,31 +60,16 @@ unsafe impl Send for Scheduler {}
 unsafe impl Sync for Scheduler {}
 
 impl Scheduler {
-    // const fn new(global_index: usize) -> impl PinInit<Self> {
-    //     let ready_queue = ReadyQueue::new();
-    //     // let mut sources = Vec::new();
-    //     // sources
-    //     //     .push((
-    //     //         &ready_queue as *const ReadyQueue as *const (),
-    //     //         ReadyQueue::vtable(),
-    //     //     ))
-    //     //     .unwrap();
-    //     pin_init!(&this in Self {
-    //         sources <- unsafe {
-    //             let mut sources = Vec::new();
-    //             sources
-    //                 .push((
-    //                     &((*(this.as_ptr())).ready_queue) as *const ReadyQueue as *const (),
-    //                     ReadyQueue::vtable(),
-    //                 ))
-    //                 .unwrap();
-    //             RwLock::new(sources)
-    //         },
-    //         global_index,
-    //         ready_queue,
-    //         _pin: PhantomPinned,
-    //     })
-    // }
+    /// 计算字段相对 self 基址的偏移量
+    fn field_offset<T>(&self, field: *const T) -> usize {
+        field as usize - self as *const Self as usize
+    }
+
+    /// 从偏移量还原绝对指针（在当前地址空间中有效）
+    fn ptr_from_offset(&self, offset: usize) -> *const () {
+        (self as *const Self as usize + offset) as *const ()
+    }
+
     /// 初始化调度器实例
     pub(crate) fn init(self_ref: Pin<&LazyInit<Self>>, global_index: usize) {
         let ready_queue = ReadyQueue::new();
@@ -93,14 +81,14 @@ impl Scheduler {
             trap_wait_queue,
             _pin: PhantomPinned,
         });
-        // pin 投影，Pin<&LazyInit<Self>> -> Pin<&TrapWaitQueue>
         let twq_ref = unsafe { self_ref.map_unchecked(|s| &s.trap_wait_queue) };
         twq_ref.init();
+        let s = unsafe { self_ref.get_ref() };
         self_ref
             .sources
             .write()
             .push((
-                &self_ref.trap_wait_queue as *const TrapWaitQueue as *const (),
+                s.field_offset(&s.trap_wait_queue),
                 TrapWaitQueue::vtable(),
             ))
             .unwrap();
@@ -108,7 +96,7 @@ impl Scheduler {
             .sources
             .write()
             .push((
-                &self_ref.ready_queue as *const ReadyQueue as *const (),
+                s.field_offset(&s.ready_queue),
                 ReadyQueue::vtable(),
             ))
             .unwrap();
@@ -138,14 +126,14 @@ impl Scheduler {
     ///
     /// 新建进程时，在内核态调用了`init_except_sources`之后，再在用户态调用`init_sources`以完成调度器实例的初始化。
     pub(crate) fn init_sources(self_ref: Pin<&LazyInit<Self>>) {
-        // pin 投影，Pin<&LazyInit<Self>> -> Pin<&TrapWaitQueue>
         let twq_ref = unsafe { self_ref.map_unchecked(|s| &s.trap_wait_queue) };
         twq_ref.init();
+        let s = unsafe { self_ref.get_ref() };
         self_ref
             .sources
             .write()
             .push((
-                &self_ref.trap_wait_queue as *const TrapWaitQueue as *const (),
+                s.field_offset(&s.trap_wait_queue),
                 TrapWaitQueue::vtable(),
             ))
             .unwrap();
@@ -153,7 +141,7 @@ impl Scheduler {
             .sources
             .write()
             .push((
-                &self_ref.ready_queue as *const ReadyQueue as *const (),
+                s.field_offset(&s.ready_queue),
                 ReadyQueue::vtable(),
             ))
             .unwrap();
@@ -183,7 +171,7 @@ impl Scheduler {
         } else {
             (len + index) as usize
         };
-        if sources.insert(insert_index, (event_source, vtable)).is_ok() {
+        if sources.insert(insert_index, (self.field_offset(event_source), vtable)).is_ok() {
             self.get_and_update_prio();
             true
         } else {
@@ -194,7 +182,8 @@ impl Scheduler {
     /// 取消注册事件源，返回是否成功取消
     fn unregister_event_source(&self, event_source: *const ()) -> bool {
         let mut sources = self.sources.write();
-        if let Some(index) = sources.iter().position(|(ptr, _)| *ptr == event_source) {
+        let target_offset = self.field_offset(event_source);
+        if let Some(index) = sources.iter().position(|(off, _)| *off == target_offset) {
             sources.remove(index);
             self.get_and_update_prio();
             true
@@ -211,7 +200,7 @@ impl Scheduler {
         let sources = self.sources.read();
         sources
             .iter()
-            .map(|(ptr, vtable)| (vtable.hightest_priority)(*ptr, cpu_id))
+            .map(|(off, vtable)| (vtable.hightest_priority)(self.ptr_from_offset(*off), cpu_id))
             .fold(isize::MAX, |a, b| if a < b { a } else { b })
     }
 
@@ -228,7 +217,7 @@ impl Scheduler {
         let sources = self.sources.read();
         let ((first_index, first_prio), (_second_index, second_prio)) = sources
             .iter()
-            .map(|(ptr, vtable)| (vtable.hightest_priority)(*ptr, cpu_id))
+            .map(|(off, vtable)| (vtable.hightest_priority)(self.ptr_from_offset(*off), cpu_id))
             .enumerate()
             .fold(
                 ((usize::MAX, isize::MAX), (usize::MAX, isize::MAX)),
@@ -248,7 +237,8 @@ impl Scheduler {
             return (None, isize::MAX);
         }
 
-        let (task, new_prio) = (sources[first_index].1.take_task)(sources[first_index].0, cpu_id); // 这句有问题
+        let ptr = self.ptr_from_offset(sources[first_index].0);
+        let (task, new_prio) = (sources[first_index].1.take_task)(ptr, cpu_id);
         if task.is_null() {
             assert!(new_prio == first_prio);
             (None, new_prio)
