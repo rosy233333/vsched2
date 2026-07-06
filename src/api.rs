@@ -162,6 +162,8 @@ extern "C" {
 /// 通过 vspace 显式定位目标地址空间中的 vDSO，完成 scheduler sources 初始化。
 /// 兼容单页表和双页表：`get_user_data` 通过 vspace 翻译到目标进程的 vDSO，
 /// 且 scheduler sources 使用字段偏移量存储，无论从内核 KVA 还是用户 UVA 访问均正确。
+/// 
+/// 该函数不会切换任务。初始化完成后若需切换任务，则需再调用`reschedule`函数。
 #[unsafe(no_mangle)]
 pub extern "C" fn user_init(vspace: *mut ()) {
     let scheduler = unsafe { get_user_data(&USER_SCHEDULER, Some(vspace)) };

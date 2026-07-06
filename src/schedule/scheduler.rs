@@ -81,6 +81,7 @@ impl Scheduler {
             trap_wait_queue,
             _pin: PhantomPinned,
         });
+        // pin 投影，Pin<&LazyInit<Self>> -> Pin<&TrapWaitQueue>
         let twq_ref = unsafe { self_ref.map_unchecked(|s| &s.trap_wait_queue) };
         twq_ref.init();
         let s = unsafe { self_ref.get_ref() };
