@@ -234,21 +234,17 @@ impl Scheduler {
             );
 
         if first_index == usize::MAX {
-            self.update_prio(isize::MAX);
+            // self.update_prio(isize::MAX);
             return (None, isize::MAX);
         }
 
         let ptr = self.ptr_from_offset(sources[first_index].0);
         let (task, new_prio) = (sources[first_index].1.take_task)(ptr, cpu_id);
         if task.is_null() {
-            assert!(new_prio == first_prio);
+            // assert!(new_prio == first_prio);
             (None, new_prio)
         } else {
-            let prio = if new_prio < second_prio {
-                new_prio
-            } else {
-                second_prio
-            };
+            let prio = self.get_and_update_prio();
             (Some(unsafe { TaskVirtImpl::from_ptr(task) }), prio)
         }
     }
@@ -293,8 +289,9 @@ impl Scheduler {
     }
 
     #[inline]
-    pub(crate) fn get_and_update_prio(&self) {
+    pub(crate) fn get_and_update_prio(&self) -> isize {
         let prio = self.hightest_priority();
         self.update_prio(prio);
+        prio
     }
 }

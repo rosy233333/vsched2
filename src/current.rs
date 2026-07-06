@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
 use lazyinit::LazyInit;
 use spin::mutex::SpinMutex;
-use vdso_helper::{get_vvar_data, vvar_data};
+use vdso_helper::{get_vvar_data, log::warn, vvar_data};
 
 use crate::{
     interface::{SMPVirtImpl, TaskVirtImpl, UserData, UserDataVirtImpl, CPU_NUM, SMP},
@@ -79,12 +79,14 @@ vvar_data! {
 
 pub(crate) fn get_current_task() -> &'static TaskVirtImpl {
     let cpu_id = SMPVirtImpl::cpu_id();
+    // warn!("get_current_task: cpu_id: {}", cpu_id);
     let mut_ptr = get_vvar_data!(CURRENT_TASK)[cpu_id].load(Ordering::Acquire);
     unsafe { TaskVirtImpl::from_mut(mut_ptr) }
 }
 
 pub(crate) fn set_current_task(task: &'static TaskVirtImpl) {
     let cpu_id = SMPVirtImpl::cpu_id();
+    // warn!("set_current_task: cpu_id: {}", cpu_id);
     let current_task = &get_vvar_data!(CURRENT_TASK)[cpu_id];
     current_task.store(task.to_ptr() as *mut (), Ordering::Release);
 }

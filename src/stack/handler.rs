@@ -223,8 +223,8 @@ impl Default for StackHandler {
         // Self::new() 这样合适还是现在这样全0之后再初始化合适？
         Self {
             free_stacks: FnvIndexMap::new(),
-            current_stack: [None; CPU_NUM],
-            trap_stack: [None; CPU_NUM],
+            current_stack: [const { None }; CPU_NUM],
+            trap_stack: [const { None }; CPU_NUM],
         }
     }
 }

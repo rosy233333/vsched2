@@ -1,6 +1,6 @@
 // 全局进程数组，及每个进程在数组中存储的信息
 
-use crate::{interface::PROCESS_NUM, schedule::scheduler::Scheduler};
+use crate::{interface::PROCESS_NUM, schedule::scheduler::Scheduler, VSpace, VSpaceVirtImpl};
 use core::sync::atomic::{AtomicBool, AtomicIsize, AtomicPtr, AtomicUsize, Ordering};
 use heapless::Vec;
 
@@ -34,11 +34,11 @@ pub(crate) struct ProcessInfo {
     pub(crate) highest_prio: AtomicIsize,
     /// 进程的地址空间
     ///
-    /// AtomicPtr指向的内容（`*mut ()`）为存储在内核空间的页表根节点，
-    /// 通过这种方式限制地址空间信息只能在内核态访问。
+    /// 指针指向的数据结构由OS定义。可以不直接指向页表根节点，而指向内核的某个数据结构，
+    /// 这样防止从用户态获得页表根节点。
     ///
     /// 地址空间指针可以为空，这代表该进程可以在所有地址空间下运行，目前应该只有单页表情况下的内核进程符合该条件。
-    pub(crate) vspace: AtomicPtr<*mut ()>,
+    pub(crate) vspace: AtomicPtr<()>,
     /// 调度器，用于内核访问其它进程的调度器。因此指针为内核空间中的地址。
     /// 用户态访问调度器直接通过USER_SCHEDULER访问。
     pub(crate) scheduler: AtomicPtr<Scheduler>,
@@ -83,6 +83,14 @@ impl ProcessInfoTable {
 
     /// 注销一个进程号，返回是否成功注销
     pub(crate) fn unregister_process(&self, index: usize) -> bool {
+        let vspace = self.table[index]
+            .vspace
+            .swap(core::ptr::null_mut(), Ordering::AcqRel);
+        if !vspace.is_null() {
+            unsafe {
+                VSpaceVirtImpl::from_mut(vspace).dealloc();
+            }
+        }
         self.table[index].valid.swap(false, Ordering::AcqRel)
     }
 

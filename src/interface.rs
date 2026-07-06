@@ -139,7 +139,14 @@ trait_interface! {
         /// 切换地址空间
         ///
         /// 地址空间使用`*mut ()`表示，即为`ProcessInfo`中的`vspace`中的内容。
-        fn into_vspace(vspace: *mut ());
+        fn into_vspace(&self);
+        /// 释放表示地址空间的相应数据结构
+        ///
+        /// 该数据结构在`process_init`中传入vDSO并存储于`PROCESS_INFO_TABLE`中，
+        /// 并在`process_drop`函数中释放。
+        ///
+        /// 不一定要释放页表，例如可能只是降低了引用计数
+        fn dealloc(&self);
     }
 }
 
@@ -175,7 +182,7 @@ trait_interface! {
 }
 
 #[repr(u8)]
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum TaskState {
     /// 就绪状态，可以从就绪队列中取出运行。
     ///
