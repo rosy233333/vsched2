@@ -210,14 +210,17 @@ extern "C" {
     pub fn raw_kschedule() -> !;
 }
 
-/// 在用户态调用的调度器初始化接口，每个用户进程初始化一次。
+/// 在用户态或内核态调用的调度器初始化接口，每个用户进程初始化一次。
 ///
+/// 通过 vspace 显式定位目标地址空间中的 vDSO，完成 scheduler sources 初始化。
+/// 兼容单页表和双页表：`get_user_data` 通过 vspace 翻译到目标进程的 vDSO，
+/// 且 scheduler sources 使用字段偏移量存储，无论从内核 KVA 还是用户 UVA 访问均正确。
+/// 
 /// 该函数不会切换任务。初始化完成后若需切换任务，则需再调用`reschedule`函数。
 #[unsafe(no_mangle)]
-pub extern "C" fn user_init() {
-    // 初始化内核态未初始化的，调度器的`sources`字段。
-    Scheduler::init_sources(unsafe { Pin::new_unchecked(&USER_SCHEDULER) });
-
+pub extern "C" fn user_init(vspace: *mut ()) {
+    let scheduler = unsafe { get_user_data(&USER_SCHEDULER, Some(vspace)) };
+    Scheduler::init_sources(unsafe { Pin::new_unchecked(scheduler) });
     // 用户态不需要初始化CURRENT_TASK、IN_KERNEL、STACK_HANDLER和CURRENT_VSPACE，因为它们在内核态切换到用户态任务时会被正确设置。
     // （TODO: 真的吗？）
 }
