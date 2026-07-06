@@ -431,7 +431,7 @@ global_asm!(
         # `uschedule`为`schedule_loop.rs`中的rust函数。
         # 仅在下一任务在本进程中时，会从该函数返回。
         # 参数：
-        # - \#1: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+        # - ax: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
         push_1_arg esi
         call uschedule
         pop_1_arg
@@ -465,8 +465,8 @@ global_asm!(
         # `run_task`为`schedule_loop.rs`中的rust函数。
         # 仅在运行协程时，会从该函数返回。
         # 参数：
-        # - \#1: 代表当前特权级，1为用户态，0为内核态。
-        # - \#2: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+        # - ax: 代表当前特权级，1为用户态，0为内核态。
+        # - bx: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
         # 返回值：
         # - ax: 特权级
         #     - 0: 内核态
@@ -595,7 +595,7 @@ global_asm!(
         # `uschedule`为`schedule_loop.rs`中的rust函数。
         # 仅在下一任务在本进程中时，会从该函数返回。
         # 参数：
-        # - \#1: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+        # - ax: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
         push_1_arg r13
         call uschedule
         pop_1_arg
@@ -629,8 +629,8 @@ global_asm!(
         # `run_task`为`schedule_loop.rs`中的rust函数。
         # 仅在运行协程时，会从该函数返回。
         # 参数：
-        # - \#1: 代表当前特权级，1为用户态，0为内核态。
-        # - \#2: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+        # - ax: 代表当前特权级，1为用户态，0为内核态。
+        # - bx: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
         # 返回值：
         # - ax: 特权级
         #     - 0: 内核态
@@ -651,7 +651,7 @@ global_asm!(
         # `krun_utask`为`schedule_loop.rs`中的rust函数。
         # 不会从该函数返回。
         # 参数：
-        # - \#1: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
+        # - ax: 代表`schedule_loop`函数所在栈的状态，0为空栈，1为非空栈。
         push_1_arg r13
         call krun_utask
         # 不可达
