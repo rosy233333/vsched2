@@ -251,19 +251,19 @@ global_asm!(
 
     # `raw_thread_entry`为os进行线程主动让权，保存上下文后进入的入口。
     raw_thread_entry:
-        li s2, 1
         # `thread_entry`为`schedule_loop.rs`中的rust函数。
-        # 判断当前特权级后返回。
         # 返回值：
-        # - a0: 当前特权级，决定下一步的跳转目标
-        #   - 0: 内核态，跳转至kschedule
-        #   - 1: 用户态，跳转至uschedule
+        # - 通过第0和第1位分别存储当前特权级（1为用户态，0为内核态）和栈状态（0为空栈，1为非空栈）
+        #   - 同时，特权级也决定了下一步的跳转目标。
+        #     - 0: 内核态，跳转至kschedule
+        #     - 1: 用户态，跳转至uschedule
         call thread_entry
-        mv s1, a0
+        andi s1, a0, 1
+        srli s2, a0, 1
         li a1, 0
-        beq a0, a1, raw_kschedule
+        beq s1, a1, raw_kschedule
         li a1, 1
-        beq a0, a1, raw_uschedule
+        beq s1, a1, raw_uschedule
         # 不可达
         .word 0xdeadbeef
 

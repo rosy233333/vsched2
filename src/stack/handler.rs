@@ -189,7 +189,7 @@ impl StackHandler {
             // 非空栈，需要切到空栈
             let empty_stack = self.alloc_stack();
             let old_stack = self.set_current_stack(empty_stack, cpu_id);
-            warn!("get_empty_stack");
+            // info!("get_empty_stack");
             assert!(old_stack.is_none());
         }
         self.current_stack[cpu_id].as_ref().unwrap().base() as usize
@@ -210,12 +210,12 @@ impl StackHandler {
         let old_stack = {
             if let Some(stack) = thread_stack {
                 let stack = self.set_current_stack(stack, SMPVirtImpl::cpu_id());
-                warn!("get_thread_stack, thread_stack = Some");
+                // info!("get_thread_stack, thread_stack = Some");
                 stack
             } else {
                 let stack = self.current_stack[SMPVirtImpl::cpu_id()].take();
                 // info!("take current_stack: {:#x?}", stack);
-                warn!("get_thread_stack, thread_stack = None");
+                // info!("get_thread_stack, thread_stack = None");
                 stack
             }
         };

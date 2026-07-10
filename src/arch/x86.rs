@@ -381,20 +381,20 @@ global_asm!(
 
     # `raw_thread_entry`为os进行线程主动让权，保存上下文后进入的入口。
     raw_thread_entry:
-        mov esi, 1
         # `thread_entry`为`schedule_loop.rs`中的rust函数。
-        # 判断当前特权级后返回。
         # 返回值：
-        # - ax: 当前特权级，决定下一步的跳转目标
-        #   - 0: 内核态，跳转至kschedule
-        #   - 1: 用户态，跳转至uschedule
+        # - 通过第0和第1位分别存储当前特权级（1为用户态，0为内核态）和栈状态（0为空栈，1为非空栈）
+        #   - 同时，特权级也决定了下一步的跳转目标。
+        #     - 0: 内核态，跳转至kschedule
+        #     - 1: 用户态，跳转至uschedule
         push_0_arg
         call thread_entry
         pop_0_arg
-        mov edi, eax
-        cmp eax, 0
+        and edi, rax, 1
+        shr esi, rax, 1
+        cmp edi, 0
         je raw_kschedule
-        cmp eax, 1
+        cmp edi, 1
         je raw_uschedule
         # 不可达
         .long 0xdeadbeef
@@ -545,20 +545,20 @@ global_asm!(
 
     # `raw_thread_entry`为os进行线程主动让权，保存上下文后进入的入口。
     raw_thread_entry:
-        mov r13, 1
         # `thread_entry`为`schedule_loop.rs`中的rust函数。
-        # 判断当前特权级后返回。
         # 返回值：
-        # - ax: 当前特权级，决定下一步的跳转目标
-        #   - 0: 内核态，跳转至kschedule
-        #   - 1: 用户态，跳转至uschedule
+        # - 通过第0和第1位分别存储当前特权级（1为用户态，0为内核态）和栈状态（0为空栈，1为非空栈）
+        #   - 同时，特权级也决定了下一步的跳转目标。
+        #     - 0: 内核态，跳转至kschedule
+        #     - 1: 用户态，跳转至uschedule
         push_0_arg
         call thread_entry
         pop_0_arg
-        mov r12, rax
-        cmp rax, 0
+        and r12, rax, 1
+        shr r13, rax, 1
+        cmp r12, 0
         je raw_kschedule
-        cmp rax, 1
+        cmp r12, 1
         je raw_uschedule
         # 不可达
         .long 0xdeadbeef

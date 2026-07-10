@@ -1,6 +1,6 @@
 use crate::{
     get_sp,
-    main_loop::{run_coroutine, run_thread},
+    main_loop::{run_coroutine, run_thread, thread_entry_phase2},
     switch_sp_tratrampoline,
 };
 
@@ -25,6 +25,12 @@ pub(crate) unsafe extern "C" fn coroutine_trampoline() -> ! {
 #[unsafe(naked)]
 pub(crate) unsafe extern "C" fn thread_trampoline() -> ! {
     switch_sp_tratrampoline!(run_thread)
+}
+
+#[no_mangle]
+#[unsafe(naked)]
+pub(crate) unsafe extern "C" fn tep2_trampoline() -> ! {
+    switch_sp_tratrampoline!(thread_entry_phase2)
 }
 
 // #[no_mangle]

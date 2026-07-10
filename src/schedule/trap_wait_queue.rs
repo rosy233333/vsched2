@@ -17,7 +17,7 @@ use core::{
 use heapless::Deque;
 use lazyinit::LazyInit;
 use spin::mutex::Mutex;
-use vdso_helper::get_vvar_data;
+use vdso_helper::{get_vvar_data, log::warn};
 
 use crate::{
     current::get_current_task, schedule::event_source::EventSource, SMPVirtImpl, Task, TaskState,
@@ -110,8 +110,7 @@ pub(crate) fn trap_handler(queue: *const ()) {
                 if task.state() != TaskState::Exited {
                     task.set_state(TaskState::Ready);
                 } else {
-                    #[cfg(feature = "log")]
-                    log::warn!("trap_handler: task is Exited, skipping push");
+                    warn!("trap_handler: task is Exited, skipping push");
                 }
                 let scheduler = if task.is_kernel() {
                     get_vvar_data!(KERNEL_SCHEDULER).load(Ordering::Acquire)

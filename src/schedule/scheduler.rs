@@ -10,7 +10,6 @@ use vdso_helper::{get_vvar_data, log::warn};
 
 use super::event_source::{EventSource, EventSourceVtable};
 use crate::{
-    get_ra,
     interface::{SMPVirtImpl, TaskVirtImpl, EVENT_SORCE_NUM, SMP},
     schedule::{
         ready_queue::ReadyQueue,
@@ -88,10 +87,10 @@ impl Scheduler {
         twq_ref.init();
         let s = unsafe { self_ref.get_ref() };
         let twq_offset = s.field_offset(&s.trap_wait_queue);
-        warn!("trap_wait_queue offset: {:#x}", twq_offset);
+        // info!("trap_wait_queue offset: {:#x}", twq_offset);
         sources.push((twq_offset, TrapWaitQueue::vtable())).unwrap();
         let rq_offset = s.field_offset(&s.ready_queue);
-        warn!("ready_queue offset: {:#x}", rq_offset);
+        // info!("ready_queue offset: {:#x}", rq_offset);
         sources.push((rq_offset, ReadyQueue::vtable())).unwrap();
         self_ref.get_and_update_prio_with_guard(sources.downgrade());
     }
@@ -219,7 +218,7 @@ impl Scheduler {
     pub(crate) fn pop_task(&self) -> (Option<&TaskVirtImpl>, isize) {
         let cpu_id = SMPVirtImpl::cpu_id();
         let sources = self.sources.read();
-        warn!("after get sources, ra={:#x}", get_ra!());
+        // info!("after get sources");
         let ((first_index, first_prio), (_second_index, second_prio)) = sources
             .iter()
             .map(|(off, vtable)| (vtable.hightest_priority)(self.ptr_from_offset(*off), cpu_id))
@@ -238,7 +237,7 @@ impl Scheduler {
             );
 
         if first_index == usize::MAX {
-            warn!("before return, no source, ra={:#x}", get_ra!());
+            // info!("before return, no source");
             // self.update_prio(isize::MAX);
             return (None, isize::MAX);
         }
@@ -246,23 +245,18 @@ impl Scheduler {
         let offset = sources[first_index].0;
         let ptr = self.ptr_from_offset(offset);
         let take_task_fn = sources[first_index].1.take_task;
-        // warn!(
+        // info!(
         //     "offset: {:#x}, ptr: {:#x}, fn: {:#x}",
         //     sources[first_index].0, ptr as usize, take_task_fn as usize
         // );
-        warn!("before take_task, ra={:#x}", get_ra!());
+        // info!("before take_task");
         let (task, new_prio) = take_task_fn(ptr, cpu_id);
-        warn!("return from take_task, ra={:#x}", get_ra!());
+        // info!("return from take_task");
         if task.is_null() {
-            // assert!(new_prio == first_prio);
-            warn!("before return, task = None, ra={:#x}", get_ra!());
+            // info!("before return, task = None");
             (None, new_prio)
         } else {
-            warn!(
-                "before return, task = Some({:#x}), ra={:#x}",
-                task as usize,
-                get_ra!()
-            );
+            // info!("before return, task = Some({:#x})", task as usize);
             (Some(unsafe { TaskVirtImpl::from_ptr(task) }), new_prio)
         }
     }

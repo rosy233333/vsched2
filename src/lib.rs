@@ -22,16 +22,16 @@ mod stack;
 pub use current::VvarData;
 pub use interface::*;
 
-/// 获得ra寄存器的值，测试用
-#[macro_export]
-macro_rules! get_ra {
-    () => {
-        unsafe {
-            let ra: usize;
-            core::arch::asm!("
-                mv {}, ra
-            ", out(reg) ra, options(nostack));
-            ra
-        }
-    };
-}
+// /// 获得ra寄存器的值，测试用
+// #[macro_export]
+// macro_rules! get_ra {
+//     () => {
+//         unsafe {
+//             let ra: usize;
+//             core::arch::asm!("
+//                 mv {}, ra
+//             ", out(reg) ra, options(nostack));
+//             ra
+//         }
+//     };
+// }

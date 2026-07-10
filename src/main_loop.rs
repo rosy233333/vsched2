@@ -19,8 +19,8 @@ use crate::{
     jump_to_trampoline,
     schedule::scheduler::Scheduler,
     set_pre_stack,
-    stack::{coroutine_trampoline, thread_trampoline},
-    Stack, StackVirtImpl, TrapInfo,
+    stack::{coroutine_trampoline, tep2_trampoline, thread_trampoline},
+    Stack, StackVirtImpl, TrapInfo, CPU_NUM,
 };
 use vdso_helper::{
     get_vvar_data,
@@ -79,10 +79,10 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 drop(stacks);
                 let current_task = get_current_task();
                 let prev_state = current_task.set_state(TaskState::Blocked);
-                warn!(
-                    "trap entry: current task {:#x}, state {:?} -> Blocked",
-                    current_task as *const _ as usize, prev_state
-                );
+                // warn!(
+                //     "trap entry: current task {:#x}, state {:?} -> Blocked",
+                //     current_task as *const _ as usize, prev_state
+                // );
                 push_prev_task(TaskState::Blocked);
                 let scheduler =
                     unsafe { &*get_vvar_data!(KERNEL_SCHEDULER).load(Ordering::Acquire) };
@@ -129,10 +129,10 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
 
                 let current_task = get_current_task();
                 let prev_state = current_task.set_state(TaskState::Ready);
-                warn!(
-                    "trap entry: current task {:#x}, state {:?} -> Ready",
-                    current_task as *const _ as usize, prev_state
-                );
+                // warn!(
+                //     "trap entry: current task {:#x}, state {:?} -> Ready",
+                //     current_task as *const _ as usize, prev_state
+                // );
                 push_prev_task(TaskState::Ready);
                 let scheduler =
                     unsafe { &*get_vvar_data!(KERNEL_SCHEDULER).load(Ordering::Acquire) };
@@ -150,10 +150,10 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 // sset_user_pre_stack!(new_stack_base);
                 let current_task = get_current_task();
                 let prev_state = current_task.set_state(TaskState::Ready);
-                warn!(
-                    "trap entry: current task {:#x}, state {:?} -> Ready",
-                    current_task as *const _ as usize, prev_state
-                );
+                // warn!(
+                //     "trap entry: current task {:#x}, state {:?} -> Ready",
+                //     current_task as *const _ as usize, prev_state
+                // );
                 push_prev_task(TaskState::Ready);
                 2
             } else {
@@ -174,45 +174,73 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
 //     todo!()
 // }
 
-/// 从线程进入调度器的入口，也就是触发线程重新调度的函数
+/// 从线程进入调度器的入口，也就是触发线程重新调度的函数。
 ///
-/// 先修改当前任务状态，再判断当前特权级并返回。
+/// 如果CPU数量大于1，则需要在线程进入调度器时切换到空栈，防止调度器复用线程栈的同时，线程在其它核心上运行导致同步问题。
+///
+/// 无论是否切换栈，都会进入thread_entry_phase2中进行后续操作。
+/// 该函数的返回值即为thread_entry_phase2的返回值
 #[no_mangle]
 pub extern "C" fn thread_entry() -> usize {
     assert_disable_irq("thread_entry");
+    if CPU_NUM > 1 {
+        let in_kernel = get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()]
+            .load(core::sync::atomic::Ordering::Acquire);
+        // 切换或回收栈
+        let new_sp = {
+            let mut stack_handler = if !in_kernel {
+                STACK_HANDLER.lock()
+            } else {
+                get_vvar_data!(KERNEL_STACKS).lock()
+            };
+            stack_handler.get_empty_stack(1)
+        };
+        jump_to_trampoline!(tep2_trampoline, new_sp);
+    } else {
+        thread_entry_phase2()
+    }
+}
+
+/// 1. 修改当前任务状态
+/// 2. 根据任务状态执行对任务的操作（例如，放回就绪队列、退出）
+/// 3. 判断当前特权级并返回
+///
+/// 返回值：通过第0和第1位分别存储当前特权级（1为用户态，0为内核态）和栈状态（0为空栈，1为非空栈）
+#[no_mangle]
+pub(crate) extern "C" fn thread_entry_phase2() -> usize {
     let current_task = get_current_task();
     match current_task.state() {
         TaskState::Blocking => {
             current_task.set_state(TaskState::Blocked);
-            warn!(
-                "thread entry: current task {:#x}, state Blocking -> Blocked",
-                current_task as *const _ as usize
-            );
+            // warn!(
+            //     "thread entry: current task {:#x}, state Blocking -> Blocked",
+            //     current_task as *const _ as usize
+            // );
             push_prev_task(TaskState::Blocked);
         }
         TaskState::Running => {
             current_task.set_state(TaskState::Ready);
-            warn!(
-                "thread entry: current task {:#x}, state Running -> Ready",
-                current_task as *const _ as usize
-            );
+            // warn!(
+            //     "thread entry: current task {:#x}, state Running -> Ready",
+            //     current_task as *const _ as usize
+            // );
             push_prev_task(TaskState::Ready);
         }
         state => {
-            warn!(
-                "thread entry: current task {:#x}, state {:?}",
-                current_task as *const _ as usize, state
-            );
+            // warn!(
+            //     "thread entry: current task {:#x}, state {:?}",
+            //     current_task as *const _ as usize, state
+            // );
             push_prev_task(state);
         }
     }
     let in_kernel = get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()]
         .load(core::sync::atomic::Ordering::Acquire);
-    if in_kernel {
-        0
-    } else {
-        1
+    let mut res: usize = if CPU_NUM == 1 { 2 } else { 0 };
+    if !in_kernel {
+        res += 1;
     }
+    res
 }
 
 // /// 同步trap处理函数
@@ -249,7 +277,7 @@ pub extern "C" fn kschedule() -> usize {
         if res != 2 {
             break res;
         }
-        // warn!("do not get task");
+        // info!("do not get task");
     }
 }
 
@@ -293,9 +321,9 @@ pub extern "C" fn utok_schedule() -> usize {
         }
 
         let scheduler = unsafe { &*get_vvar_data!(KERNEL_SCHEDULER).load(Ordering::Acquire) };
-        warn!("after get scheduler");
+        // info!("after get scheduler");
         next_pid = process_schedule(scheduler);
-        warn!("after process schedule");
+        // info!("after process schedule");
     }
 }
 
@@ -383,20 +411,20 @@ fn ktask_schedule(next_pid: usize) -> usize {
     if next_pid == 0 {
         // 从当前调度器获取下一任务并运行
         let kscheduler = unsafe { &*get_vvar_data!(KERNEL_SCHEDULER).load(Ordering::Acquire) };
-        warn!("before pop task");
+        // info!("before pop task");
         if let (Some(next_task), new_prio) = kscheduler.pop_task() {
             // get_vvar_data!(PROCESS_INFO_TABLE).table[0]
             //     .highest_prio
             //     .store(new_prio, Ordering::Release);
-            warn!("after pop task");
+            // info!("after pop task");
             switch_vspace(next_task.pid());
             // next_task.set_state(TaskState::Running);
-            // warn!("after switch vspace");
+            // info!("after switch vspace");
             set_current_task(next_task);
-            // warn!("after set current task");
+            // info!("after set current task");
             return 0; // 一定是内核态任务
         } else {
-            warn!("after pop task=null");
+            // info!("after pop task=null");
             return 2;
         }
     } else {
@@ -488,7 +516,7 @@ fn utask_schedule(next_pid: usize, stack_status: usize) -> usize {
 /// ```
 #[no_mangle]
 pub extern "C" fn run_task(privilege: usize, stack_status: usize) -> usize {
-    warn!("run task: {:#x}", get_current_task() as *const _ as usize);
+    // warn!("run task: {:#x}", get_current_task() as *const _ as usize);
     if get_current_task().is_coroutine() {
         // 切换或回收栈
         let new_sp = {
@@ -586,26 +614,26 @@ pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
     if let Poll::Ready(val) = res {
         current_task.set_return_value(val);
         current_task.set_state(TaskState::Exited);
-        warn!(
-            "coroutine entry: current task {:#x}, state Poll::Ready -> Exited",
-            current_task as *const _ as usize
-        );
+        // warn!(
+        //     "coroutine entry: current task {:#x}, state Poll::Ready -> Exited",
+        //     current_task as *const _ as usize
+        // );
         push_prev_task(TaskState::Exited);
     } else if state == TaskState::Blocking || state == TaskState::Running {
         // 协程主动让权时，可能设置了任务状态也可能不设置。
         // 若设置了`Blocking`状态，则在此处改为`Blocked`状态。
         // 在不设置任务状态的情况，在此处设置为`Blocked`状态。
         current_task.set_state(TaskState::Blocked);
-        warn!(
-            "coroutine entry: current task {:#x}, state {:?} -> Blocked",
-            current_task as *const _ as usize, state
-        );
+        // warn!(
+        //     "coroutine entry: current task {:#x}, state {:?} -> Blocked",
+        //     current_task as *const _ as usize, state
+        // );
         push_prev_task(TaskState::Blocked);
     } else {
-        warn!(
-            "coroutine entry: current task {:#x}, state {:?}",
-            current_task as *const _ as usize, state
-        );
+        // warn!(
+        //     "coroutine entry: current task {:#x}, state {:?}",
+        //     current_task as *const _ as usize, state
+        // );
         push_prev_task(state);
     }
     let in_kernel = {

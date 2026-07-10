@@ -74,10 +74,10 @@ pub trait EventSource {
                 es.take_task(cpu_id)
             },
         };
-        warn!(
-            "vtable: hightest_priority: {:#x}, take_task: {:#x}",
-            vtable.hightest_priority as *const () as usize, vtable.take_task as *const () as usize
-        );
+        // info!(
+        //     "vtable: hightest_priority: {:#x}, take_task: {:#x}",
+        //     vtable.hightest_priority as *const () as usize, vtable.take_task as *const () as usize
+        // );
         vtable
     }
 }
