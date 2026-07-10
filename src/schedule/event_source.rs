@@ -2,6 +2,8 @@
 //!
 //! 为了实现泛型，采用“指针+vtable”表示事件源。
 
+use vdso_helper::log::warn;
+
 /// 事件源的接口，因为每个事件源的接口不同，因此使用Vtable而非trait_interface定义接口
 ///
 /// 事件源需要实现内部可变性和与之适配的同步机制
@@ -62,7 +64,7 @@ pub trait EventSource {
     where
         Self: Sized,
     {
-        EventSourceVtable {
+        let vtable = EventSourceVtable {
             hightest_priority: |ptr, cpu_id| {
                 let es = unsafe { &*(ptr as *const Self) };
                 es.hightest_priority(cpu_id)
@@ -71,6 +73,11 @@ pub trait EventSource {
                 let es = unsafe { &*(ptr as *const Self) };
                 es.take_task(cpu_id)
             },
-        }
+        };
+        warn!(
+            "vtable: hightest_priority: {:#x}, take_task: {:#x}",
+            vtable.hightest_priority as *const () as usize, vtable.take_task as *const () as usize
+        );
+        vtable
     }
 }

@@ -1,5 +1,6 @@
 use crate::interface::{SMPVirtImpl, Stack, StackVirtImpl, CPU_NUM, SMP, STACK_POOL_SIZE};
 use heapless::index_map::FnvIndexMap;
+use vdso_helper::log::warn;
 
 // /// 对栈进行封装
 // ///
@@ -114,6 +115,7 @@ impl StackHandler {
     // }
 
     pub(crate) fn alloc_stack(&mut self) -> &'static mut StackVirtImpl {
+        // 这里因为持有的是可变引用，所以两次获取应该没有问题？
         if let Some((&addr, _)) = self.free_stacks.iter().next() {
             self.free_stacks.remove(&addr).unwrap()
         } else {
@@ -126,7 +128,7 @@ impl StackHandler {
         self.free_stacks.remove(&addr);
         match self.free_stacks.insert(addr, stack) {
             Err((_, stack)) => stack.dealloc(),
-            Ok(_) => {},
+            Ok(_) => {}
         }
     }
 
@@ -174,6 +176,7 @@ impl StackHandler {
     ) -> Option<&'static mut StackVirtImpl> {
         self.trap_stack[cpu_id].replace(stack)
     }
+
     /// self切换到空栈，返回空栈的栈底。
     ///
     /// 对应黄色框部分
@@ -186,6 +189,7 @@ impl StackHandler {
             // 非空栈，需要切到空栈
             let empty_stack = self.alloc_stack();
             let old_stack = self.set_current_stack(empty_stack, cpu_id);
+            warn!("get_empty_stack");
             assert!(old_stack.is_none());
         }
         self.current_stack[cpu_id].as_ref().unwrap().base() as usize
@@ -205,10 +209,13 @@ impl StackHandler {
     ) {
         let old_stack = {
             if let Some(stack) = thread_stack {
-                self.set_current_stack(stack, SMPVirtImpl::cpu_id())
+                let stack = self.set_current_stack(stack, SMPVirtImpl::cpu_id());
+                warn!("get_thread_stack, thread_stack = Some");
+                stack
             } else {
                 let stack = self.current_stack[SMPVirtImpl::cpu_id()].take();
                 // info!("take current_stack: {:#x?}", stack);
+                warn!("get_thread_stack, thread_stack = None");
                 stack
             }
         };

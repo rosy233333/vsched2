@@ -5,11 +5,12 @@ use core::{marker::PhantomPinned, pin::Pin, sync::atomic::Ordering};
 use heapless::Vec;
 use lazyinit::LazyInit;
 // use pinned_init::{pin_data, pin_init, PinInit};
-use spin::rwlock::RwLock;
-use vdso_helper::get_vvar_data;
+use spin::{rwlock::RwLock, RwLockReadGuard};
+use vdso_helper::{get_vvar_data, log::warn};
 
 use super::event_source::{EventSource, EventSourceVtable};
 use crate::{
+    get_ra,
     interface::{SMPVirtImpl, TaskVirtImpl, EVENT_SORCE_NUM, SMP},
     schedule::{
         ready_queue::ReadyQueue,
@@ -81,27 +82,18 @@ impl Scheduler {
             trap_wait_queue,
             _pin: PhantomPinned,
         });
+        let mut sources = self_ref.sources.write();
         // pin 投影，Pin<&LazyInit<Self>> -> Pin<&TrapWaitQueue>
         let twq_ref = unsafe { self_ref.map_unchecked(|s| &s.trap_wait_queue) };
         twq_ref.init();
         let s = unsafe { self_ref.get_ref() };
-        self_ref
-            .sources
-            .write()
-            .push((
-                s.field_offset(&s.trap_wait_queue),
-                TrapWaitQueue::vtable(),
-            ))
-            .unwrap();
-        self_ref
-            .sources
-            .write()
-            .push((
-                s.field_offset(&s.ready_queue),
-                ReadyQueue::vtable(),
-            ))
-            .unwrap();
-        self_ref.get_and_update_prio();
+        let twq_offset = s.field_offset(&s.trap_wait_queue);
+        warn!("trap_wait_queue offset: {:#x}", twq_offset);
+        sources.push((twq_offset, TrapWaitQueue::vtable())).unwrap();
+        let rq_offset = s.field_offset(&s.ready_queue);
+        warn!("ready_queue offset: {:#x}", rq_offset);
+        sources.push((rq_offset, ReadyQueue::vtable())).unwrap();
+        self_ref.get_and_update_prio_with_guard(sources.downgrade());
     }
 
     /// 初始化调度器实例的`sources`以外的字段。
@@ -127,26 +119,18 @@ impl Scheduler {
     ///
     /// 新建进程时，在内核态调用了`init_except_sources`之后，再在用户态调用`init_sources`以完成调度器实例的初始化。
     pub(crate) fn init_sources(self_ref: Pin<&LazyInit<Self>>) {
+        let mut sources = self_ref.sources.write();
+        // pin 投影，Pin<&LazyInit<Self>> -> Pin<&TrapWaitQueue>
         let twq_ref = unsafe { self_ref.map_unchecked(|s| &s.trap_wait_queue) };
         twq_ref.init();
         let s = unsafe { self_ref.get_ref() };
-        self_ref
-            .sources
-            .write()
-            .push((
-                s.field_offset(&s.trap_wait_queue),
-                TrapWaitQueue::vtable(),
-            ))
+        sources
+            .push((s.field_offset(&s.trap_wait_queue), TrapWaitQueue::vtable()))
             .unwrap();
-        self_ref
-            .sources
-            .write()
-            .push((
-                s.field_offset(&s.ready_queue),
-                ReadyQueue::vtable(),
-            ))
+        sources
+            .push((s.field_offset(&s.ready_queue), ReadyQueue::vtable()))
             .unwrap();
-        self_ref.get_and_update_prio();
+        self_ref.get_and_update_prio_with_guard(sources.downgrade());
     }
 
     /// 注册事件源
@@ -172,8 +156,11 @@ impl Scheduler {
         } else {
             (len + index) as usize
         };
-        if sources.insert(insert_index, (self.field_offset(event_source), vtable)).is_ok() {
-            self.get_and_update_prio();
+        if sources
+            .insert(insert_index, (self.field_offset(event_source), vtable))
+            .is_ok()
+        {
+            self.get_and_update_prio_with_guard(sources.downgrade());
             true
         } else {
             false
@@ -186,7 +173,7 @@ impl Scheduler {
         let target_offset = self.field_offset(event_source);
         if let Some(index) = sources.iter().position(|(off, _)| *off == target_offset) {
             sources.remove(index);
-            self.get_and_update_prio();
+            self.get_and_update_prio_with_guard(sources.downgrade());
             true
         } else {
             false
@@ -205,6 +192,22 @@ impl Scheduler {
             .fold(isize::MAX, |a, b| if a < b { a } else { b })
     }
 
+    /// 在已持有self.source的Guard的情况下，执行hightest_priority。
+    ///
+    /// 返回该调度器中所有事件源中所有就绪任务的最高优先级。优先级数值越低，优先级越高。
+    ///
+    /// 若没有事件源，返回`isize::MAX`；若有事件源但没有就绪任务，返回比最低优先级更低一级的优先级。
+    pub(crate) fn hightest_priority_with_guard<'a>(
+        &self,
+        guard: RwLockReadGuard<'a, Vec<(usize, EventSourceVtable), EVENT_SORCE_NUM>>,
+    ) -> isize {
+        let cpu_id = SMPVirtImpl::cpu_id();
+        guard
+            .iter()
+            .map(|(off, vtable)| (vtable.hightest_priority)(self.ptr_from_offset(*off), cpu_id))
+            .fold(isize::MAX, |a, b| if a < b { a } else { b })
+    }
+
     /// 从调度器中取出最高优先级的下一任务
     ///
     /// 返回值：
@@ -216,6 +219,7 @@ impl Scheduler {
     pub(crate) fn pop_task(&self) -> (Option<&TaskVirtImpl>, isize) {
         let cpu_id = SMPVirtImpl::cpu_id();
         let sources = self.sources.read();
+        warn!("after get sources, ra={:#x}", get_ra!());
         let ((first_index, first_prio), (_second_index, second_prio)) = sources
             .iter()
             .map(|(off, vtable)| (vtable.hightest_priority)(self.ptr_from_offset(*off), cpu_id))
@@ -234,18 +238,32 @@ impl Scheduler {
             );
 
         if first_index == usize::MAX {
+            warn!("before return, no source, ra={:#x}", get_ra!());
             // self.update_prio(isize::MAX);
             return (None, isize::MAX);
         }
 
-        let ptr = self.ptr_from_offset(sources[first_index].0);
-        let (task, new_prio) = (sources[first_index].1.take_task)(ptr, cpu_id);
+        let offset = sources[first_index].0;
+        let ptr = self.ptr_from_offset(offset);
+        let take_task_fn = sources[first_index].1.take_task;
+        // warn!(
+        //     "offset: {:#x}, ptr: {:#x}, fn: {:#x}",
+        //     sources[first_index].0, ptr as usize, take_task_fn as usize
+        // );
+        warn!("before take_task, ra={:#x}", get_ra!());
+        let (task, new_prio) = take_task_fn(ptr, cpu_id);
+        warn!("return from take_task, ra={:#x}", get_ra!());
         if task.is_null() {
             // assert!(new_prio == first_prio);
+            warn!("before return, task = None, ra={:#x}", get_ra!());
             (None, new_prio)
         } else {
-            let prio = self.get_and_update_prio();
-            (Some(unsafe { TaskVirtImpl::from_ptr(task) }), prio)
+            warn!(
+                "before return, task = Some({:#x}), ra={:#x}",
+                task as usize,
+                get_ra!()
+            );
+            (Some(unsafe { TaskVirtImpl::from_ptr(task) }), new_prio)
         }
     }
 
@@ -291,6 +309,19 @@ impl Scheduler {
     #[inline]
     pub(crate) fn get_and_update_prio(&self) -> isize {
         let prio = self.hightest_priority();
+        self.update_prio(prio);
+        prio
+    }
+
+    /// 在已持有self.source的Guard的情况下，执行get_and_update_prio。
+    ///
+    /// 不会重复获取guard。
+    #[inline]
+    pub(crate) fn get_and_update_prio_with_guard<'a>(
+        &self,
+        guard: RwLockReadGuard<'a, Vec<(usize, EventSourceVtable), EVENT_SORCE_NUM>>,
+    ) -> isize {
+        let prio = self.hightest_priority_with_guard(guard);
         self.update_prio(prio);
         prio
     }

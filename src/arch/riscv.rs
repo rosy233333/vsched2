@@ -23,7 +23,7 @@
 //!
 //! 返回过程：（被调用者）恢复ra、fp和其它寄存器 -> （被调用者）上移sp以清理栈帧 -> （被调用者）ret -> （调用者）上移sp以清理参数
 
-use core::arch::global_asm;
+use core::arch::{asm, global_asm};
 
 // // 全局宏定义，用于兼容32位和64位的差异
 // #[cfg(target_arch = "riscv32")]
@@ -355,3 +355,16 @@ global_asm!(
         
 "#
 );
+
+pub(crate) fn assert_disable_irq(info: &str) {
+    let mut sstatus: usize;
+    unsafe {
+        asm!("csrr {}, sstatus", out(reg) sstatus);
+    }
+    let sie_mask: usize = 0b10;
+    assert!(
+        sstatus & sie_mask == 0,
+        "disable_irq assertion failed: {}",
+        info
+    );
+}
