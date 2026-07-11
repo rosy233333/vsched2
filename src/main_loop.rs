@@ -63,6 +63,7 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 let mut stacks = get_vvar_data!(KERNEL_STACKS).lock();
                 // info!("[trap_entry:sync] old_sscratch={:#x}", old_sscratch);
                 let new_stack = stacks.alloc_stack();
+                warn!("alloc trap stack: {:#x}", new_stack.base() as usize);
                 set_pre_stack!(new_stack.base());
                 // Recycle the old pre-save stack: set it as current_stack so
                 // run_task / krun_utask will reuse or dealloc it.
@@ -105,13 +106,14 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 unreachable!("unknown privilege level: {privilege}")
             }
         }
-        // 外部中断，将当前任务重新放回就绪态后进入对应调度器。
+        // 中断，将当前任务重新放回就绪态后进入对应调度器。
         1 => {
             if privilege == 0 {
                 let cpu_id = SMPVirtImpl::cpu_id();
                 let mut stacks = get_vvar_data!(KERNEL_STACKS).lock();
                 // info!("[trap_entry:irq] old_sscratch={:#x}", old_sscratch);
                 let new_stack = stacks.alloc_stack();
+                warn!("alloc trap stack: {:#x}", new_stack.base() as usize);
                 set_pre_stack!(new_stack.base());
                 // Recycle the old pre-save stack: set it as current_stack so
                 // run_task / krun_utask will reuse or dealloc it.
@@ -186,7 +188,7 @@ pub extern "C" fn thread_entry() -> usize {
     if CPU_NUM > 1 {
         let in_kernel = get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()]
             .load(core::sync::atomic::Ordering::Acquire);
-        // 切换或回收栈
+        // 切换栈
         let new_sp = {
             let mut stack_handler = if !in_kernel {
                 STACK_HANDLER.lock()
