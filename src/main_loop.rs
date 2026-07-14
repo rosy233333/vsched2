@@ -79,12 +79,21 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 let _old = stacks.set_current_stack(current_stack, cpu_id);
                 drop(stacks);
                 let current_task = get_current_task();
+                // 关于current_task.set_state、push_prev_task和scheduler.push_trap的先后关系：
+                //
+                // 对于异常/系统调用，需要先set_state和push_prev_task，再push_trap。
+                // 因为set_state、push_prev_task和push_trap都有可能修改任务的上下文/状态，
+                // 其中push_trap需要使用任务当前的上下文构造TrapInfo，之后，该trap就有可能被处理完成，从而唤醒该任务，修改状态。
+                // 而set_state和push_prev_task期望的是在任务当前被trap打断的状态的基础上修改状态和上下文，并且不会将任务放入就绪或阻塞队列。
+                // 因此：
+                // 一方面，如果任务在set_state和push_prev_task之前已经被唤醒了，就可能导致set_state和push_prev_task获取的上下文不正确。
+                // 另一方面，set_state和push_prev_task不会导致任务可能被运行，从而push_trap使用的上下文正确。
                 let prev_state = current_task.set_state(TaskState::Blocked);
+                push_prev_task(TaskState::Blocked);
                 // warn!(
                 //     "trap entry: current task {:#x}, state {:?} -> Blocked",
                 //     current_task as *const _ as usize, prev_state
                 // );
-                push_prev_task(TaskState::Blocked);
                 let scheduler =
                     unsafe { &*get_vvar_data!(KERNEL_SCHEDULER).load(Ordering::Acquire) };
                 // trap处理需要传入任务
@@ -113,7 +122,7 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 let mut stacks = get_vvar_data!(KERNEL_STACKS).lock();
                 // info!("[trap_entry:irq] old_sscratch={:#x}", old_sscratch);
                 let new_stack = stacks.alloc_stack();
-                warn!("alloc trap stack: {:#x}", new_stack.base() as usize);
+                // warn!("alloc trap stack: {:#x}", new_stack.base() as usize);
                 set_pre_stack!(new_stack.base());
                 // Recycle the old pre-save stack: set it as current_stack so
                 // run_task / krun_utask will reuse or dealloc it.
@@ -126,16 +135,19 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 //     }
                 // }
                 let current_stack = stacks.set_trap_stack(new_stack, cpu_id).unwrap();
+                // 关于current_task.set_state、push_prev_task和scheduler.push_trap的先后关系：
+                //
+                // 对于中断，需要先push_trap，再set_state和push_prev_task，。
+                // 因为set_state、push_prev_task和push_trap都有可能修改任务的上下文/状态，
+                // 其中push_trap需要使用任务当前的上下文构造TrapInfo，而之后该trap处理完成也不会影响任务的状态。
+                // 而set_state和push_prev_task期望的是在任务当前被trap打断的状态的基础上修改状态和上下文，并且会将任务放入就绪队列，导致任务可能被运行。
+                // 因此：
+                // 一方面，如果任务在push_trap之前已经再次运行了，就可能导致push_trap获取的上下文不正确。
+                // 另一方面，push_trap不会导致任务可能被运行，从而set_state和push_prev_task使用的上下文正确。
                 let _old = stacks.set_current_stack(current_stack, cpu_id);
                 drop(stacks);
 
                 let current_task = get_current_task();
-                let prev_state = current_task.set_state(TaskState::Ready);
-                // warn!(
-                //     "trap entry: current task {:#x}, state {:?} -> Ready",
-                //     current_task as *const _ as usize, prev_state
-                // );
-                push_prev_task(TaskState::Ready);
                 let scheduler =
                     unsafe { &*get_vvar_data!(KERNEL_SCHEDULER).load(Ordering::Acquire) };
                 // 外部中断处理不需要传入任务
@@ -146,6 +158,13 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                         SMPVirtImpl::cpu_id(),
                     )
                     .unwrap();
+                let prev_state = current_task.set_state(TaskState::Ready);
+                // warn!(
+                //     "trap entry: current task {:#x}, state {:?} -> Ready",
+                //     current_task as *const _ as usize, prev_state
+                // );
+                push_prev_task(TaskState::Ready);
+
                 1
             } else if privilege == 1 {
                 // let new_stack_base = STACK_HANDLER.lock().alloc_stack().base;
@@ -156,6 +175,7 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 //     "trap entry: current task {:#x}, state {:?} -> Ready",
                 //     current_task as *const _ as usize, prev_state
                 // );
+                todo!("用户态中断处理流程");
                 push_prev_task(TaskState::Ready);
                 2
             } else {
@@ -343,7 +363,6 @@ fn switch_vspace(vspace_pid: usize) {
         }
         // 切换地址空间理论上不会影响代码的执行，因为此处的数据均位于内核子空间中，而切换只会影响到用户子空间。
         // 需要确认？
-        unreachable!();
         unsafe { VSpaceVirtImpl::from_mut(vspace).into_vspace() };
     }
 }
@@ -430,7 +449,6 @@ fn ktask_schedule(next_pid: usize) -> usize {
             return 2;
         }
     } else {
-        unreachable!();
         // 切换地址空间和调度器后获取下一任务并运行
         switch_vspace(next_pid);
 

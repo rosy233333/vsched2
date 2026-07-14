@@ -164,7 +164,7 @@ impl StackHandler {
         // }
         let stack = self.alloc_stack();
         let base = stack.base();
-        warn!("alloc trap stack: {:#x}", base as usize);
+        // warn!("alloc trap stack: {:#x}", base as usize);
         let old = self.trap_stack[cpu_id].replace(stack);
         assert!(old.is_none());
         base
