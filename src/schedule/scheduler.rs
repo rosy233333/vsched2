@@ -239,6 +239,7 @@ impl Scheduler {
         if first_index == usize::MAX {
             // info!("before return, no source");
             // self.update_prio(isize::MAX);
+            self.update_prio(isize::MAX);
             return (None, isize::MAX);
         }
 
@@ -252,12 +253,18 @@ impl Scheduler {
         // info!("before take_task");
         let (task, new_prio) = take_task_fn(ptr, cpu_id);
         // info!("return from take_task");
+        let prio = if new_prio < second_prio {
+            new_prio
+        } else {
+            second_prio
+        };
+        self.update_prio(prio);
         if task.is_null() {
             // info!("before return, task = None");
-            (None, new_prio)
+            (None, prio)
         } else {
             // info!("before return, task = Some({:#x})", task as usize);
-            (Some(unsafe { TaskVirtImpl::from_ptr(task) }), new_prio)
+            (Some(unsafe { TaskVirtImpl::from_ptr(task) }), prio)
         }
     }
 
