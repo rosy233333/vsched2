@@ -11,8 +11,12 @@ trait_interface! {
     pub trait Task {
         /// 任务状态
         fn state(&self) -> TaskState;
-        /// 设置任务状态
+        /// 设置任务状态，返回任务的旧状态。
         fn set_state(&self, state: TaskState) -> TaskState;
+        /// 根据任务当前的状态，修改任务状态为参数中的对应值。返回任务的旧状态。
+        ///
+        /// 该接口对任务状态的所有比较和修改需要实现为一个原子操作，从而防止多核下任务阻塞和唤醒相关的同步问题。
+        fn match_set_state(&self, state_from_ready: TaskState, state_from_running: TaskState, state_from_blocked: TaskState, state_from_exited: TaskState, state_from_blocking: TaskState) -> TaskState;
         /// 任务优先级
         fn priority(&self) -> isize;
         /// 判断任务为线程或协程，依据是保存的上下文类型

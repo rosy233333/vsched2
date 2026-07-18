@@ -136,7 +136,7 @@ pub(crate) fn trap_handler(queue: *const ()) {
             // 没有trap，等待
             // 不需要存储Waker，因为总是可以从`TrapWaitQueue`中获取该任务。
             let task = get_current_task();
-            task.set_state(TaskState::Blocked);
+            task.set_state(TaskState::Blocking);
             task.resched();
         }
     }
@@ -156,6 +156,12 @@ impl EventSource for TrapWaitQueue {
         if self.queues[cpu_id].lock().is_empty() {
             (core::ptr::null(), INACTIVE_PRIORITY)
         } else {
+            // 只要有TrapInfo，就可以取出trap_handler。
+            // 因为trap_handler只会在当前核心上运行，所以取出trap_handler时，其一定不在运行，也就是保存好了上下文。
+            //
+            // TODO: 这种情况还未处理：
+            // trap_handler阻塞在某个内核资源上，但任务重调度时，trap_wait_queue仍会取出以最高优先级取出该任务。
+            // 导致trap_handler被一直执行，出现近似忙等待的状况。
             let handler = self.handlers[cpu_id].get().unwrap();
             // 无论有多少个TrapInfo，任务都会将它们处理完之后再让出，
             // 因此唤醒任务后，就可以将优先级设置为INACTIVE_PRIORITY。

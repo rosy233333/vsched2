@@ -231,9 +231,14 @@ pub extern "C" fn thread_entry() -> usize {
 #[no_mangle]
 pub(crate) extern "C" fn thread_entry_phase2() -> usize {
     let current_task = get_current_task();
-    match current_task.state() {
+    match current_task.match_set_state(
+        TaskState::Ready,
+        TaskState::Blocked,
+        TaskState::Blocked,
+        TaskState::Exited,
+        TaskState::Blocked,
+    ) {
         TaskState::Blocking => {
-            current_task.set_state(TaskState::Blocked);
             // warn!(
             //     "thread entry: current task {:#x}, state Blocking -> Blocked",
             //     current_task as *const _ as usize
@@ -241,14 +246,21 @@ pub(crate) extern "C" fn thread_entry_phase2() -> usize {
             push_prev_task(TaskState::Blocked);
         }
         TaskState::Running => {
-            current_task.set_state(TaskState::Ready);
             // warn!(
-            //     "thread entry: current task {:#x}, state Running -> Ready",
+            //     "thread entry: current task {:#x}, state Running -> Blocked",
             //     current_task as *const _ as usize
             // );
-            push_prev_task(TaskState::Ready);
+            push_prev_task(TaskState::Blocked);
+        }
+        TaskState::Blocked => {
+            panic!(
+                "thread entry: current task {:#x}, state Blocked",
+                current_task as *const _ as usize
+            );
         }
         state => {
+            // Ready、Exited
+
             // warn!(
             //     "thread entry: current task {:#x}, state {:?}",
             //     current_task as *const _ as usize, state
@@ -630,32 +642,88 @@ pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
     assert_disable_irq("before run coroutine");
     let res = current_task.poll();
     // ************** 协程主动让权的入口 **************
-    let state = current_task.state();
-    if let Poll::Ready(val) = res {
-        current_task.set_return_value(val);
-        current_task.set_state(TaskState::Exited);
-        // warn!(
-        //     "coroutine entry: current task {:#x}, state Poll::Ready -> Exited",
-        //     current_task as *const _ as usize
-        // );
-        push_prev_task(TaskState::Exited);
-    } else if state == TaskState::Blocking || state == TaskState::Running {
-        // 协程主动让权时，可能设置了任务状态也可能不设置。
-        // 若设置了`Blocking`状态，则在此处改为`Blocked`状态。
-        // 在不设置任务状态的情况，在此处设置为`Blocked`状态。
-        current_task.set_state(TaskState::Blocked);
-        // warn!(
-        //     "coroutine entry: current task {:#x}, state {:?} -> Blocked",
-        //     current_task as *const _ as usize, state
-        // );
-        push_prev_task(TaskState::Blocked);
-    } else {
-        // warn!(
-        //     "coroutine entry: current task {:#x}, state {:?}",
-        //     current_task as *const _ as usize, state
-        // );
-        push_prev_task(state);
+    // let state = current_task.state();
+    match res {
+        Poll::Ready(val) => {
+            current_task.set_return_value(val);
+            current_task.set_state(TaskState::Exited);
+            // warn!(
+            //     "coroutine entry: current task {:#x}, state Poll::Ready -> Exited",
+            //     current_task as *const _ as usize
+            // );
+            push_prev_task(TaskState::Exited);
+        }
+        Poll::Pending => {
+            match current_task.match_set_state(
+                TaskState::Ready,
+                TaskState::Blocked,
+                TaskState::Blocked,
+                TaskState::Exited,
+                TaskState::Blocked,
+            ) {
+                TaskState::Blocking => {
+                    // 协程主动让权时，可能设置了任务状态也可能不设置。
+                    // 若设置了`Blocking`状态，则在此处改为`Blocked`状态。
+                    // 在不设置任务状态的情况，在此处设置为`Blocked`状态。
+                    // warn!(
+                    //     "coroutine entry: current task {:#x}, state Blocking -> Blocked",
+                    //     current_task as *const _ as usize
+                    // );
+                    push_prev_task(TaskState::Blocked);
+                }
+                TaskState::Running => {
+                    // 协程主动让权时，可能设置了任务状态也可能不设置。
+                    // 若设置了`Blocking`状态，则在此处改为`Blocked`状态。
+                    // 在不设置任务状态的情况，在此处设置为`Blocked`状态。
+                    // warn!(
+                    //     "coroutine entry: current task {:#x}, state Running -> Blocked",
+                    //     current_task as *const _ as usize
+                    // );
+                    push_prev_task(TaskState::Blocked);
+                }
+                TaskState::Blocked => {
+                    panic!(
+                        "coroutine entry: current task {:#x}, state Blocked",
+                        current_task as *const _ as usize
+                    );
+                }
+                state => {
+                    // Ready、Exited
+
+                    // warn!(
+                    //     "coroutine entry: current task {:#x}, state {:?}",
+                    //     current_task as *const _ as usize, state
+                    // );
+                    push_prev_task(state);
+                }
+            }
+        }
     }
+    // if let Poll::Ready(val) = res {
+    //     current_task.set_return_value(val);
+    //     current_task.set_state(TaskState::Exited);
+    //     warn!(
+    //         "coroutine entry: current task {:#x}, state Poll::Ready -> Exited",
+    //         current_task as *const _ as usize
+    //     );
+    //     push_prev_task(TaskState::Exited);
+    // } else if state == TaskState::Blocking || state == TaskState::Running {
+    //     // 协程主动让权时，可能设置了任务状态也可能不设置。
+    //     // 若设置了`Blocking`状态，则在此处改为`Blocked`状态。
+    //     // 在不设置任务状态的情况，在此处设置为`Blocked`状态。
+    //     current_task.set_state(TaskState::Blocked);
+    //     warn!(
+    //         "coroutine entry: current task {:#x}, state {:?} -> Blocked",
+    //         current_task as *const _ as usize, state
+    //     );
+    //     push_prev_task(TaskState::Blocked);
+    // } else {
+    //     warn!(
+    //         "coroutine entry: current task {:#x}, state {:?}",
+    //         current_task as *const _ as usize, state
+    //     );
+    //     push_prev_task(state);
+    // }
     let in_kernel = {
         // get_current_task().save_thread_context();
         get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].load(core::sync::atomic::Ordering::Acquire)
