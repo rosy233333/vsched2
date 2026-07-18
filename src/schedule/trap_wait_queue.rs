@@ -106,6 +106,13 @@ pub(crate) fn trap_handler(queue: *const ()) {
             // TODO: 根据task切换地址空间？还是把切换地址空间放在handle接口的逻辑里？
             trap_info.handle(task.map(|t| t.to_ptr()));
             if let Some(task) = &task {
+                if task.state() != TaskState::Running {
+                    if task.state() == TaskState::Exited {
+                        warn!("trap_handler: task is Exited, skipping push");
+                    }
+                    trap_info.dealloc();
+                    continue;
+                }
                 // 任务不能是Exited状态
                 if task.state() != TaskState::Exited {
                     task.set_state(TaskState::Ready);
@@ -132,6 +139,7 @@ pub(crate) fn trap_handler(queue: *const ()) {
                 //         .store(new_prio, Ordering::Release);
                 // }
             }
+            trap_info.dealloc();
         } else {
             // 没有trap，等待
             // 不需要存储Waker，因为总是可以从`TrapWaitQueue`中获取该任务。
