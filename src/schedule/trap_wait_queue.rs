@@ -106,19 +106,20 @@ pub(crate) fn trap_handler(queue: *const ()) {
             // TODO: 根据task切换地址空间？还是把切换地址空间放在handle接口的逻辑里？
             trap_info.handle(task.map(|t| t.to_ptr()));
             if let Some(task) = &task {
-                if task.state() != TaskState::Running {
-                    if task.state() == TaskState::Exited {
-                        warn!("trap_handler: task is Exited, skipping push");
+                match task.match_set_state(
+                    TaskState::Ready,
+                    TaskState::Running,
+                    TaskState::Ready,
+                    TaskState::Exited,
+                    TaskState::Blocking,
+                ) {
+                    TaskState::Blocked => {}
+                    _ => {
+                        panic!("trap_handler: task state is not Blocked!");
+                        trap_info.dealloc();
+                        continue;
                     }
-                    trap_info.dealloc();
-                    continue;
-                }
-                // 任务不能是Exited状态
-                if task.state() != TaskState::Exited {
-                    task.set_state(TaskState::Ready);
-                } else {
-                    warn!("trap_handler: task is Exited, skipping push");
-                }
+                };
                 let scheduler = if task.is_kernel() {
                     get_vvar_data!(KERNEL_SCHEDULER).load(Ordering::Acquire)
                 } else {
