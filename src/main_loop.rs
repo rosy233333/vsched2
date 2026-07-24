@@ -362,7 +362,8 @@ pub extern "C" fn utok_schedule() -> usize {
 }
 
 /// 切换地址空间，只会在内核态调用
-fn switch_vspace(vspace_pid: usize) {
+// 改成pub(crate)是因为需要在trap_wait_queue.rs中调用
+pub(crate) fn switch_vspace(vspace_pid: usize) {
     let prev_vspace_pid =
         get_vvar_data!(CURRENT_VSPACE)[SMPVirtImpl::cpu_id()].swap(vspace_pid, Ordering::AcqRel);
     if vspace_pid != prev_vspace_pid {
