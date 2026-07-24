@@ -309,6 +309,7 @@ pub extern "C" fn current_vspace() -> usize {
 ///
 /// OS需在`TrapInfo::new_handler`的实现中，用这个函数创建trap处理任务。
 /// 该函数的参数即为`new_handler`接口中传入的参数，即指向trap等待队列中某个核心的队列的指针。
+/// 共享handler队列中，该参数指向完整TrapWaitQueue，具体TrapInfo队列由handler运行时所在CPU决定。
 ///
 /// 需要在关中断环境下调用。
 #[unsafe(no_mangle)]
