@@ -25,6 +25,8 @@
 
 use core::arch::{asm, global_asm};
 
+use vdso_helper::log;
+
 // // 全局宏定义，用于兼容32位和64位的差异
 // #[cfg(target_arch = "riscv32")]
 // global_asm!(

@@ -289,15 +289,20 @@ impl Scheduler {
                 self.get_and_update_current_prio();
             } else {
                 self.get_and_update_all_prio();
-                let cpu_id = SMPVirtImpl::cpu_id();
-                // 检查是否有CPU正在睡眠，若有则唤醒一个。
-                for i in 1..CPU_NUM {
-                    let target_cpu = (i + cpu_id) % CPU_NUM;
-                    if get_vvar_data!(IS_SLEEPING)[target_cpu].load(Ordering::Acquire) {
-                        SMPVirtImpl::send_ipi(target_cpu);
-                        break;
-                    }
-                }
+                // 目前不主动发送ipi唤醒休眠核心，
+                // 因为在测例里出现了在任务中接收到ipi --> 将任务放回就绪队列 --> 发送ipi的循环，
+                // 导致出现了大量的中断请求。
+                // 并且，休眠核心也会接收时钟中断，并在被唤醒后检查能否从调度器中取出任务，
+                // 因此这里的主动ipi唤醒也是不必要的。
+                // let cpu_id = SMPVirtImpl::cpu_id();
+                // // 检查是否有CPU正在睡眠，若有则唤醒一个。
+                // for i in 1..CPU_NUM {
+                //     let target_cpu = (i + cpu_id) % CPU_NUM;
+                //     if get_vvar_data!(IS_SLEEPING)[target_cpu].load(Ordering::Acquire) {
+                //         SMPVirtImpl::send_ipi(target_cpu);
+                //         break;
+                //     }
+                // }
             }
         }
         res
@@ -316,15 +321,20 @@ impl Scheduler {
                 self.get_and_update_current_prio();
             } else {
                 self.get_and_update_all_prio();
-                let cpu_id = SMPVirtImpl::cpu_id();
-                // 检查是否有CPU正在睡眠，若有则唤醒一个。
-                for i in 1..CPU_NUM {
-                    let target_cpu = (i + cpu_id) % CPU_NUM;
-                    if get_vvar_data!(IS_SLEEPING)[target_cpu].load(Ordering::Acquire) {
-                        SMPVirtImpl::send_ipi(target_cpu);
-                        break;
-                    }
-                }
+                // 目前不主动发送ipi唤醒休眠核心，
+                // 因为在测例里出现了在任务中接收到ipi --> 将任务放回就绪队列 --> 发送ipi的循环，
+                // 导致出现了大量的中断请求。
+                // 并且，休眠核心也会接收时钟中断，并在被唤醒后检查能否从调度器中取出任务，
+                // 因此这里的主动ipi唤醒也是不必要的。
+                // let cpu_id = SMPVirtImpl::cpu_id();
+                // // 检查是否有CPU正在睡眠，若有则唤醒一个。
+                // for i in 1..CPU_NUM {
+                //     let target_cpu = (i + cpu_id) % CPU_NUM;
+                //     if get_vvar_data!(IS_SLEEPING)[target_cpu].load(Ordering::Acquire) {
+                //         SMPVirtImpl::send_ipi(target_cpu);
+                //         break;
+                //     }
+                // }
             }
         }
         res

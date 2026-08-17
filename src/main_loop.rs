@@ -355,6 +355,7 @@ pub extern "C" fn kschedule() -> usize {
         if res != 2 {
             break res;
         }
+        // TODO: 此处可以改为循环多次后才进入睡眠，但仍无法完全解决bug。
         wait_for_runnable_task(scheduler);
     }
 }

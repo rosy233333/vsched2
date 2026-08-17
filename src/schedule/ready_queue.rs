@@ -82,7 +82,7 @@ impl EventSource for ReadyQueue {
             let res = queue.lock().pop_front();
             if let Some(task) = res {
                 // 更新优先级
-                // TODO: 这里反正用了锁，可以把检查两次改成一直持有锁
+                // 这里反正用了锁，因此把检查两次改成一直持有锁
                 // let next_prio = if queue.lock().is_empty() {
                 //     let new_bitmap = self
                 //         .prio_bitmap

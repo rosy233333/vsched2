@@ -24,8 +24,9 @@ fn switch_vspace(vspace_pid: usize) { /*先空着吧*/
 use crate::{
     current::{get_current_task, USER_SCHEDULER},
     schedule::{event_source::EventSource, scheduler::Scheduler},
-    SMPVirtImpl, Task, TaskState, TaskVirtImpl, TrapInfo, TrapInfoVirtImpl, CPU_NUM,
-    HIGHEST_PRIORITY, LOWEST_PRIORITY, SMP, TRAP_WAIT_QUEUE_SIZE,
+    SMPVirtImpl, Task, TaskState, TaskVirtImpl, TrapInfo, TrapInfoVirtImpl,
+    TrapInfo_FnIndex::handle,
+    CPU_NUM, HIGHEST_PRIORITY, LOWEST_PRIORITY, SMP, TRAP_WAIT_QUEUE_SIZE,
 };
 
 const INACTIVE_PRIORITY: isize = LOWEST_PRIORITY + 1;
@@ -39,7 +40,7 @@ type IdleHandlerQueue = Deque<&'static TaskVirtImpl, TRAP_WAIT_QUEUE_SIZE>;
 
 enum IdleHandler {
     Runnable(&'static TaskVirtImpl),
-    WakeInProgress,
+    Blocking(&'static TaskVirtImpl),
     Empty,
 }
 
@@ -130,11 +131,11 @@ fn get_idle_handler(queue: &Mutex<IdleHandlerQueue>) -> IdleHandler {
             TaskState::Running,
             TaskState::Ready,
             TaskState::Exited,
-            TaskState::Ready,
+            TaskState::Blocking,
         ) {
             TaskState::Blocked => return IdleHandler::Runnable(handler),
-            TaskState::Blocking => return IdleHandler::WakeInProgress,
-            TaskState::Exited => {}
+            TaskState::Blocking => return IdleHandler::Blocking(handler),
+            // TaskState::Exited => {}
             state => panic!("idle trap handler has invalid state {state:?}"),
         }
     }
@@ -257,8 +258,17 @@ impl EventSource for TrapWaitQueue {
 
         let handler = match get_idle_handler(&self.idle_handlers) {
             IdleHandler::Runnable(handler) => handler,
-            IdleHandler::WakeInProgress => {
-                return (core::ptr::null(), ACTIVE_PRIORITY);
+            IdleHandler::Blocking(handler) => {
+                // 忙等handler的状态变为Blocked，并设置为Ready
+                while handler.match_set_state(
+                    TaskState::Ready,
+                    TaskState::Running,
+                    TaskState::Ready,
+                    TaskState::Exited,
+                    TaskState::Blocking,
+                ) != TaskState::Blocked
+                {}
+                handler
             }
             // 创建任务可能分配内存，不能持有TrapWaitQueue的自旋锁。
             IdleHandler::Empty => {
