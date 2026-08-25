@@ -7,7 +7,7 @@ use vdso_helper::{
 };
 
 use crate::{
-    current::{get_current_task, get_user_data, STACK_HANDLER, USER_SCHEDULER},
+    current::{get_current_task, get_user_addr, get_user_data, STACK_HANDLER, USER_SCHEDULER},
     schedule::scheduler::Scheduler,
     set_pre_stack,
     stack::StackHandler,
@@ -235,14 +235,18 @@ extern "C" {
 /// 在内核态调用的，用户态调度器初始化接口，每个用户进程初始化一次。
 ///
 /// 通过 vspace 显式定位目标地址空间中的 vDSO，完成 scheduler sources 初始化。
-/// 兼容单页表和双页表：`get_user_data` 通过 vspace 翻译到目标进程的 vDSO，
-/// 且 scheduler sources 使用字段偏移量存储，无论从内核 KVA 还是用户 UVA 访问均正确。
+/// 每个事件源分别保存用户态和内核态地址，内部事件源与外部事件源都不依赖相对Scheduler的固定偏移。
 ///
 /// 该函数不会切换任务。初始化完成后若需切换任务，则需再调用`reschedule`函数。
 #[unsafe(no_mangle)]
 pub extern "C" fn user_init(vspace: *mut ()) {
     let scheduler = unsafe { get_user_data(&USER_SCHEDULER, Some(vspace)) };
-    Scheduler::init_sources(unsafe { Pin::new_unchecked(scheduler) });
+    let user_scheduler = unsafe { get_user_addr(&USER_SCHEDULER, Some(vspace)) };
+    Scheduler::init_sources(
+        unsafe { Pin::new_unchecked(scheduler) },
+        user_scheduler,
+        vspace,
+    );
     // 用户态不需要初始化CURRENT_TASK、IN_KERNEL、STACK_HANDLER和CURRENT_VSPACE，因为它们在内核态切换到用户态任务时会被正确设置。
     // （TODO: 真的吗？）
 }

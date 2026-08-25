@@ -144,3 +144,17 @@ pub(crate) unsafe fn get_user_data<T>(data: &T, vspace: Option<*mut ()>) -> &T {
 
     unsafe { &*(user_ptr as *const T) }
 }
+
+/// 获取内核地址在目标用户地址空间中的对应地址。
+///
+/// 返回的地址只用于写入用户调度器中的地址表，内核不能直接解引用。
+pub(crate) unsafe fn get_user_addr<T>(data: &T, vspace: Option<*mut ()>) -> *const T {
+    let kernel_addr = data as *const T as usize;
+    let len = core::mem::size_of::<T>();
+    let user_ptr = UserDataVirtImpl::get_user_addr(kernel_addr, len, vspace);
+    assert!(
+        !user_ptr.is_null(),
+        "UserData::get_user_addr returned a null pointer"
+    );
+    user_ptr as *const T
+}

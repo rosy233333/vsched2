@@ -223,6 +223,9 @@ pub(crate) fn trap_handler(scheduler: &Scheduler) {
                     //         .highest_prio
                     //         .store(new_prio, Ordering::Release);
                     // }
+                } else {
+                    // 这里应该加上释放任务的逻辑，否则无法处理exit系统调用的情况。
+                    task.dealloc();
                 }
             }
             trap_info.dealloc();
