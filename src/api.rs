@@ -1,8 +1,9 @@
-use core::{pin::Pin, sync::atomic::Ordering};
+use core::{pin::Pin, sync::atomic::Ordering, task::Poll};
 
+use kernel_guard::{BaseGuard, IrqSave};
 use spin::mutex::SpinMutex;
 use vdso_helper::{
-    get_vvar_data,
+    async_api, get_vvar_data,
     log::{info, warn},
 };
 
@@ -386,3 +387,79 @@ pub extern "C" fn take_current_stack() -> *mut () {
         STACK_HANDLER.lock().take_current_stack(cpu_id).to_mut()
     }
 }
+
+// ----------调度API----------
+
+/// 线程让出
+#[unsafe(no_mangle)]
+pub extern "C" fn yield_now() {
+    let current = get_current_task();
+    current.set_action(crate::SchedAction::Yield);
+    current.set_irq_state(IrqSave::acquire());
+    current.resched();
+    let state = current.get_irq_state();
+    IrqSave::release(state);
+}
+
+/// 协程让出
+#[repr(C)]
+pub struct YieldFuture(bool);
+
+impl YieldFuture {
+    pub fn new() -> Self {
+        Self(false)
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn yield_poll(fut: *mut YieldFuture, cx: &mut core::task::Context<'_>) -> Poll<()> {
+    let fut = unsafe { &mut *fut };
+    if fut.0 {
+        // 已让出
+        Poll::Ready(())
+    } else {
+        // 未让出
+        fut.0 = true;
+        let current = get_current_task();
+        current.set_action(crate::SchedAction::Yield);
+        Poll::Pending
+    }
+}
+
+async_api!(yield_now_async, YieldFuture, yield_poll);
+
+/// 线程退出
+#[unsafe(no_mangle)]
+pub extern "C" fn exit() {
+    let current = get_current_task();
+    current.set_action(crate::SchedAction::Exit);
+    current.resched();
+    unreachable!();
+}
+
+/// 协程让出
+#[repr(C)]
+pub struct ExitFuture(bool);
+
+impl ExitFuture {
+    pub fn new() -> Self {
+        Self(false)
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn exit_poll(fut: *mut ExitFuture, cx: &mut core::task::Context<'_>) -> Poll<()> {
+    let fut = unsafe { &mut *fut };
+    if fut.0 {
+        // 已退出
+        unreachable!();
+    } else {
+        // 未退出
+        fut.0 = true;
+        let current = get_current_task();
+        current.set_action(crate::SchedAction::Exit);
+        Poll::Pending
+    }
+}
+
+async_api!(exit_async, ExitFuture, exit_poll);
