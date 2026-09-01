@@ -22,6 +22,7 @@ use crate::{
     stack::{coroutine_trampoline, tep2_trampoline, thread_trampoline},
     Stack, StackVirtImpl, TrapInfo, CPU_NUM,
 };
+use kernel_guard::{BaseGuard, IrqSave};
 use vdso_helper::{
     get_vvar_data,
     log::{info, warn},
@@ -98,7 +99,7 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 // 另一方面，set_state和push_prev_task不会导致任务可能被运行，从而push_trap使用的上下文正确。
                 let prev_state = current_task.set_state(TaskState::Blocked);
                 assert!(prev_state == TaskState::Running);
-                push_prev_task(TaskState::Blocked);
+                push_prev_task(TaskState::Blocked, None);
                 // warn!(
                 //     "trap entry: current task {:#x}, state {:?} -> Blocked",
                 //     current_task as *const _ as usize, prev_state
@@ -207,7 +208,7 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 //     "trap entry: current task {:#x}, state {:?} -> Ready",
                 //     current_task as *const _ as usize, prev_state
                 // );
-                push_prev_task(TaskState::Ready);
+                push_prev_task(TaskState::Ready, None);
 
                 1
             } else if privilege == 1 {
@@ -221,7 +222,7 @@ pub extern "C" fn trap_entry(trap_type: usize, privilege: usize) -> usize {
                 //     current_task as *const _ as usize, prev_state
                 // );
                 todo!("用户态中断处理流程");
-                push_prev_task(TaskState::Ready);
+                push_prev_task(TaskState::Ready, None);
                 2
             } else {
                 unreachable!("unknown privilege level: {privilege}")
@@ -276,41 +277,63 @@ pub extern "C" fn thread_entry() -> usize {
 #[no_mangle]
 pub(crate) extern "C" fn thread_entry_phase2() -> usize {
     let current_task = get_current_task();
-    match current_task.match_set_state(
-        TaskState::Ready,
-        TaskState::Blocked,
-        TaskState::Blocked,
-        TaskState::Exited,
-        TaskState::Blocked,
-    ) {
-        TaskState::Blocking => {
-            // warn!(
-            //     "thread entry: current task {:#x}, state Blocking -> Blocked",
-            //     current_task as *const _ as usize
-            // );
-            push_prev_task(TaskState::Blocked);
-        }
-        TaskState::Running => {
-            // warn!(
-            //     "thread entry: current task {:#x}, state Running -> Blocked",
-            //     current_task as *const _ as usize
-            // );
-            push_prev_task(TaskState::Blocked);
-        }
-        TaskState::Blocked => {
-            panic!(
-                "thread entry: current task {:#x}, state Blocked",
-                current_task as *const _ as usize
-            );
-        }
-        state => {
-            // Ready、Exited
+    // match current_task.match_set_state(
+    //     TaskState::Ready,
+    //     TaskState::Blocked,
+    //     TaskState::Blocked,
+    //     TaskState::Exited,
+    //     TaskState::Blocked,
+    // ) {
+    //     TaskState::Blocking => {
+    //         // warn!(
+    //         //     "thread entry: current task {:#x}, state Blocking -> Blocked",
+    //         //     current_task as *const _ as usize
+    //         // );
+    //         push_prev_task(TaskState::Blocked);
+    //     }
+    //     TaskState::Running => {
+    //         // warn!(
+    //         //     "thread entry: current task {:#x}, state Running -> Blocked",
+    //         //     current_task as *const _ as usize
+    //         // );
+    //         push_prev_task(TaskState::Blocked);
+    //     }
+    //     TaskState::Blocked => {
+    //         panic!(
+    //             "thread entry: current task {:#x}, state Blocked",
+    //             current_task as *const _ as usize
+    //         );
+    //     }
+    //     state => {
+    //         // Ready、Exited
 
-            // warn!(
-            //     "thread entry: current task {:#x}, state {:?}",
-            //     current_task as *const _ as usize, state
-            // );
-            push_prev_task(state);
+    //         // warn!(
+    //         //     "thread entry: current task {:#x}, state {:?}",
+    //         //     current_task as *const _ as usize, state
+    //         // );
+    //         push_prev_task(state);
+    //     }
+    // }
+    match current_task.set_action(crate::SchedAction::JustBlock) {
+        crate::SchedAction::JustBlock => unreachable!(),
+        crate::SchedAction::Yield => {
+            current_task.set_state(TaskState::Ready);
+            push_prev_task(TaskState::Ready, None);
+        }
+        crate::SchedAction::Block(id) => {
+            if todo!("判断阻塞队列信号量>0") {
+                current_task.set_state(TaskState::Blocked);
+                push_prev_task(TaskState::Blocked, Some(id));
+                todo!("释放阻塞队列信号量的锁");
+            } else {
+                todo!("释放阻塞队列信号量的锁");
+                current_task.set_state(TaskState::Ready);
+                push_prev_task(TaskState::Ready, None);
+            }
+        }
+        crate::SchedAction::Exit => {
+            current_task.set_state(TaskState::Exited);
+            push_prev_task(TaskState::Exited, None);
         }
     }
     let in_kernel = get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()]
@@ -462,7 +485,7 @@ pub(crate) fn switch_vspace(vspace_pid: usize) {
 
 /// 根据上一任务（也就是已运行过的CURRENT_TASK）的状态，
 /// 将上一任务放入对应的位置。
-fn push_prev_task(state: TaskState) {
+fn push_prev_task(state: TaskState, wait_queue_id: Option<usize>) {
     match state {
         TaskState::Ready => {
             // Push to the task's own scheduler, not blindly to current_scheduler.
@@ -492,6 +515,11 @@ fn push_prev_task(state: TaskState) {
         TaskState::Exited => {
             let current_task = get_current_task();
             current_task.dealloc();
+        }
+        TaskState::Blocked => {
+            if let Some(wait_queue_id) = wait_queue_id {
+                todo!("放入阻塞队列");
+            }
         }
         _state => {}
     }
@@ -725,10 +753,13 @@ pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
     let prev_state = current_task.set_state(TaskState::Running);
     assert!(prev_state == TaskState::Ready || prev_state == TaskState::Blocked);
     assert_disable_irq("before run coroutine");
+    let irq_state = current_task.get_irq_state();
+    IrqSave::release(irq_state);
     let res = current_task.poll();
     // ************** 协程主动让权的入口 **************
     // let state = current_task.state();
-    assert_disable_irq("after run coroutine");
+    let irq_state = IrqSave::acquire();
+    current_task.set_irq_state(irq_state);
     match res {
         Poll::Ready(val) => {
             current_task.set_return_value(val);
@@ -737,79 +768,84 @@ pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
             //     "coroutine entry: current task {:#x}, state Poll::Ready -> Exited",
             //     current_task as *const _ as usize
             // );
-            push_prev_task(TaskState::Exited);
+            push_prev_task(TaskState::Exited, None);
         }
         Poll::Pending => {
-            match current_task.match_set_state(
-                TaskState::Ready,
-                TaskState::Blocked,
-                TaskState::Blocked,
-                TaskState::Exited,
-                TaskState::Blocked,
-            ) {
-                TaskState::Blocking => {
-                    // 协程主动让权时，可能设置了任务状态也可能不设置。
-                    // 若设置了`Blocking`状态，则在此处改为`Blocked`状态。
-                    // 在不设置任务状态的情况，在此处设置为`Blocked`状态。
-                    // warn!(
-                    //     "coroutine entry: current task {:#x}, state Blocking -> Blocked",
-                    //     current_task as *const _ as usize
-                    // );
-                    push_prev_task(TaskState::Blocked);
-                }
-                TaskState::Running => {
-                    // 协程主动让权时，可能设置了任务状态也可能不设置。
-                    // 若设置了`Blocking`状态，则在此处改为`Blocked`状态。
-                    // 在不设置任务状态的情况，在此处设置为`Blocked`状态。
-                    // warn!(
-                    //     "coroutine entry: current task {:#x}, state Running -> Blocked",
-                    //     current_task as *const _ as usize
-                    // );
-                    push_prev_task(TaskState::Blocked);
-                }
-                TaskState::Blocked => {
-                    panic!(
-                        "coroutine entry: current task {:#x}, state Blocked",
-                        current_task as *const _ as usize
-                    );
-                }
-                state => {
-                    // Ready、Exited
+            // match current_task.match_set_state(
+            //     TaskState::Ready,
+            //     TaskState::Blocked,
+            //     TaskState::Blocked,
+            //     TaskState::Exited,
+            //     TaskState::Blocked,
+            // ) {
+            //     TaskState::Blocking => {
+            //         // 协程主动让权时，可能设置了任务状态也可能不设置。
+            //         // 若设置了`Blocking`状态，则在此处改为`Blocked`状态。
+            //         // 在不设置任务状态的情况，在此处设置为`Blocked`状态。
+            //         // warn!(
+            //         //     "coroutine entry: current task {:#x}, state Blocking -> Blocked",
+            //         //     current_task as *const _ as usize
+            //         // );
+            //         push_prev_task(TaskState::Blocked);
+            //     }
+            //     TaskState::Running => {
+            //         // 协程主动让权时，可能设置了任务状态也可能不设置。
+            //         // 若设置了`Blocking`状态，则在此处改为`Blocked`状态。
+            //         // 在不设置任务状态的情况，在此处设置为`Blocked`状态。
+            //         // warn!(
+            //         //     "coroutine entry: current task {:#x}, state Running -> Blocked",
+            //         //     current_task as *const _ as usize
+            //         // );
+            //         push_prev_task(TaskState::Blocked);
+            //     }
+            //     TaskState::Blocked => {
+            //         panic!(
+            //             "coroutine entry: current task {:#x}, state Blocked",
+            //             current_task as *const _ as usize
+            //         );
+            //     }
+            //     state => {
+            //         // Ready、Exited
 
-                    // warn!(
-                    //     "coroutine entry: current task {:#x}, state {:?}",
-                    //     current_task as *const _ as usize, state
-                    // );
-                    push_prev_task(state);
+            //         // warn!(
+            //         //     "coroutine entry: current task {:#x}, state {:?}",
+            //         //     current_task as *const _ as usize, state
+            //         // );
+            //         push_prev_task(state);
+            //     }
+            // }
+            let guard = current_task.state_lock_acquire();
+            match current_task.set_action(crate::SchedAction::JustBlock) {
+                crate::SchedAction::JustBlock => {
+                    current_task.set_state(TaskState::Blocked);
+                    current_task.state_lock_release(guard);
+                    push_prev_task(TaskState::Blocked, None);
+                }
+                crate::SchedAction::Yield => {
+                    current_task.state_lock_release(guard);
+                    current_task.set_state(TaskState::Ready);
+                    push_prev_task(TaskState::Ready, None);
+                }
+                crate::SchedAction::Block(id) => {
+                    current_task.state_lock_release(guard);
+                    if todo!("判断阻塞队列信号量>0") {
+                        current_task.set_state(TaskState::Blocked);
+                        push_prev_task(TaskState::Blocked, Some(id));
+                        todo!("释放阻塞队列信号量的锁");
+                    } else {
+                        todo!("释放阻塞队列信号量的锁");
+                        current_task.set_state(TaskState::Ready);
+                        push_prev_task(TaskState::Ready, None);
+                    }
+                }
+                crate::SchedAction::Exit => {
+                    current_task.state_lock_release(guard);
+                    current_task.set_state(TaskState::Exited);
+                    push_prev_task(TaskState::Exited, None);
                 }
             }
         }
     }
-    // if let Poll::Ready(val) = res {
-    //     current_task.set_return_value(val);
-    //     current_task.set_state(TaskState::Exited);
-    //     warn!(
-    //         "coroutine entry: current task {:#x}, state Poll::Ready -> Exited",
-    //         current_task as *const _ as usize
-    //     );
-    //     push_prev_task(TaskState::Exited);
-    // } else if state == TaskState::Blocking || state == TaskState::Running {
-    //     // 协程主动让权时，可能设置了任务状态也可能不设置。
-    //     // 若设置了`Blocking`状态，则在此处改为`Blocked`状态。
-    //     // 在不设置任务状态的情况，在此处设置为`Blocked`状态。
-    //     current_task.set_state(TaskState::Blocked);
-    //     warn!(
-    //         "coroutine entry: current task {:#x}, state {:?} -> Blocked",
-    //         current_task as *const _ as usize, state
-    //     );
-    //     push_prev_task(TaskState::Blocked);
-    // } else {
-    //     warn!(
-    //         "coroutine entry: current task {:#x}, state {:?}",
-    //         current_task as *const _ as usize, state
-    //     );
-    //     push_prev_task(state);
-    // }
     let in_kernel = {
         // get_current_task().save_thread_context();
         get_vvar_data!(IN_KERNEL)[SMPVirtImpl::cpu_id()].load(core::sync::atomic::Ordering::Acquire)
