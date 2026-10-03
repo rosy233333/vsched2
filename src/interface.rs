@@ -269,15 +269,51 @@ pub enum TaskState {
 /// 下一次主动进入调度器时，调度器的行为。
 ///
 /// 暂存在TCB中，在进入调度器后读取。
-#[repr(u8)]
 #[derive(PartialEq, Debug)]
 pub enum SchedAction {
     /// 阻塞，但不需要放入阻塞队列中（用于处理其它异步函数已经注册了阻塞队列的情况）
+    ///
+    /// 低32位取值为0。
+    ///
+    /// JustBlock作为SchedAction的默认值，用于适配协程的poll函数返回Pending时的情况。
     JustBlock,
     /// 让出
+    ///
+    /// 低32位取值为1
     Yield,
     /// 阻塞，放入对应id的阻塞队列中
-    Block(usize),
+    ///
+    /// 低32位取值为2，高32位为阻塞队列id
+    Block(u32),
     /// 退出
+    ///
+    /// 低32位取值为3
     Exit,
+}
+
+impl TryFrom<u64> for SchedAction {
+    type Error = u32;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        let upper = (value >> 32) as u32;
+        let lower = value as u32;
+        match lower {
+            0 => Ok(SchedAction::JustBlock),
+            1 => Ok(SchedAction::Yield),
+            2 => Ok(SchedAction::Block(upper)),
+            3 => Ok(SchedAction::Exit),
+            _ => Err(lower),
+        }
+    }
+}
+
+impl From<SchedAction> for u64 {
+    fn from(action: SchedAction) -> Self {
+        match action {
+            SchedAction::JustBlock => 0,
+            SchedAction::Yield => 1,
+            SchedAction::Block(id) => ((id as u64) << 32) | 2,
+            SchedAction::Exit => 3,
+        }
+    }
 }

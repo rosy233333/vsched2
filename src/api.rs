@@ -1,12 +1,4 @@
-use core::{pin::Pin, sync::atomic::Ordering, task::Poll};
-
-use kernel_guard::{BaseGuard, IrqSave};
-use spin::mutex::SpinMutex;
-use vdso_helper::{
-    async_api, get_vvar_data,
-    log::{info, warn},
-};
-
+#[cfg(feature = "vdso_only")]
 use crate::{
     current::{get_current_task, get_user_addr, get_user_data, STACK_HANDLER, USER_SCHEDULER},
     schedule::scheduler::Scheduler,
@@ -14,6 +6,20 @@ use crate::{
     stack::StackHandler,
     SMPVirtImpl, StackVirtImpl, Task, TaskVirtImpl, TrapInfo, TrapInfoVirtImpl, SMP,
 };
+#[cfg(feature = "vdso_only")]
+use core::{pin::Pin, sync::atomic::Ordering};
+#[cfg(feature = "vdso_only")]
+use kernel_guard::{BaseGuard, IrqSave};
+#[cfg(feature = "vdso_only")]
+use spin::mutex::SpinMutex;
+#[cfg(feature = "vdso_only")]
+use vdso_helper::{
+    get_vvar_data,
+    log::{info, warn},
+};
+
+pub use core::task::Poll;
+use vdso_helper::async_api;
 
 /// 在内核的主核心调用的调度器初始化接口。
 ///
@@ -27,6 +33,7 @@ use crate::{
 /// - `init_task_ptr`：内核初始化执行流（当前执行流）所属的任务指针。需要内核先创建该任务，再将其指针传入该函数中。
 ///
 /// 需要在关中断环境下调用。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_init_main(init_stack: *mut (), init_task_ptr: *const ()) {
     let cpu_id = SMPVirtImpl::cpu_id();
@@ -87,6 +94,7 @@ pub extern "C" fn kernel_init_main(init_stack: *mut (), init_task_ptr: *const ()
 /// - `init_task_ptr`：内核初始化执行流（当前执行流）所属的任务指针。需要内核先创建该任务，再将其指针传入该函数中。
 ///
 /// 需要在关中断环境下调用。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_init_secondary(init_stack: *mut (), init_task_ptr: *const ()) {
     // 不需初始化调度器，因为其已由`kernel_init_main`在主核心中初始化，并通过vDSO在所有核心中共享。
@@ -137,6 +145,7 @@ pub extern "C" fn kernel_init_secondary(init_stack: *mut (), init_task_ptr: *con
 /// 在实现时，一级指针可以放在TCB等位置，从而和进程一同释放。
 ///
 /// 返回值：为该进程分配的pid
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn process_init(vspace: *mut ()) -> usize {
     // 初始化PROCESS_INFO_TABLE，分配进程号，填写地址空间。
@@ -168,6 +177,7 @@ pub extern "C" fn process_init(vspace: *mut ()) -> usize {
 /// 在内核态调用的进程销毁接口。
 ///
 /// 目前只会释放进程表中的对应项。不会回收地址空间等资源，需要os负责回收。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn process_drop(pid: usize) {
     get_vvar_data!(PROCESS_INFO_TABLE).unregister_process(pid);
@@ -176,6 +186,7 @@ pub extern "C" fn process_drop(pid: usize) {
 // 在build_vdso中增加了暴露extern "C"函数的功能，通过以下的写法可以暴露汇编函数接口。
 // 在os中使用时，不使用同名函数，而是直接从vtable中获取函数指针，从而避免多余的跳转和函数调用接口的适配。
 // 以下函数可能有参数。接口见相应的汇编实现。
+#[cfg(feature = "vdso_only")]
 extern "C" {
     /// `raw_trap_entry`为os发生trap、保存上下文并进行一定的解析后进入的入口。
     ///
@@ -239,6 +250,7 @@ extern "C" {
 /// 每个事件源分别保存用户态和内核态地址，内部事件源与外部事件源都不依赖相对Scheduler的固定偏移。
 ///
 /// 该函数不会切换任务。初始化完成后若需切换任务，则需再调用`reschedule`函数。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn user_init(vspace: *mut ()) {
     let scheduler = unsafe { get_user_data(&USER_SCHEDULER, Some(vspace)) };
@@ -257,6 +269,7 @@ pub extern "C" fn user_init(vspace: *mut ()) {
 /// task指针指向实现了`Task` trait的类型。
 ///
 /// 返回值表示是否成功放入。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn push_task_into_current(task: *const ()) -> bool {
     let scheduler = USER_SCHEDULER.get().unwrap();
@@ -270,6 +283,7 @@ pub extern "C" fn push_task_into_current(task: *const ()) -> bool {
 /// task指针指向实现了`Task` trait的类型。
 ///
 /// 返回值表示是否成功放入。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn push_task(task: *const ()) -> bool {
     let task = unsafe { TaskVirtImpl::from_ptr(task) };
@@ -301,6 +315,7 @@ pub extern "C" fn push_task(task: *const ()) -> bool {
 /// task指针指向实现了`Task` trait的类型。
 ///
 /// 返回值表示是否成功放入。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn push_task_into_process(task: *const (), pid: usize) -> bool {
     if get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
@@ -327,6 +342,7 @@ pub extern "C" fn push_task_into_process(task: *const (), pid: usize) -> bool {
 /// 当前地址空间
 ///
 /// 需要在关中断环境下调用。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn current_vspace() -> usize {
     get_vvar_data!(CURRENT_VSPACE)[SMPVirtImpl::cpu_id()].load(Ordering::Acquire)
@@ -339,6 +355,7 @@ pub extern "C" fn current_vspace() -> usize {
 /// 共享handler队列中，该参数指向完整TrapWaitQueue，具体TrapInfo队列由handler运行时所在CPU决定。
 ///
 /// 需要在关中断环境下调用。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn trap_handler(scheduler: *const ()) {
     crate::schedule::trap_wait_queue::trap_handler(unsafe { &*(scheduler as *const Scheduler) });
@@ -349,6 +366,7 @@ pub extern "C" fn trap_handler(scheduler: *const ()) {
 /// 可能未初始化，此时会返回空指针。
 ///
 /// 需要在关中断环境下调用。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn current_task_ptr() -> *const () {
     get_vvar_data!(CURRENT_TASK)[SMPVirtImpl::cpu_id()].load(Ordering::Acquire)
@@ -357,6 +375,7 @@ pub extern "C" fn current_task_ptr() -> *const () {
 /// 设置当前任务指针，返回之前的值。
 ///
 /// 需要在关中断环境下调用。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn set_current_task_ptr(task: *const ()) -> *const () {
     assert!(
@@ -373,6 +392,7 @@ pub extern "C" fn set_current_task_ptr(task: *const ()) -> *const () {
 /// TODO: 修改如上设计和栈的相关设计，避免调度器和线程同时使用一个栈的同步问题。
 ///
 /// 需要在关中断环境下调用。
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn take_current_stack() -> *mut () {
     let cpu_id = SMPVirtImpl::cpu_id();
@@ -391,6 +411,7 @@ pub extern "C" fn take_current_stack() -> *mut () {
 // ----------调度API----------
 
 /// 线程让出
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn yield_now() {
     let current = get_current_task();
@@ -411,6 +432,7 @@ impl YieldFuture {
     }
 }
 
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn yield_poll(fut: *mut YieldFuture, cx: &mut core::task::Context<'_>) -> Poll<()> {
     let fut = unsafe { &mut *fut };
@@ -429,6 +451,7 @@ pub extern "C" fn yield_poll(fut: *mut YieldFuture, cx: &mut core::task::Context
 async_api!(yield_now_async, YieldFuture, yield_poll);
 
 /// 线程退出
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn exit() {
     let current = get_current_task();
@@ -447,6 +470,7 @@ impl ExitFuture {
     }
 }
 
+#[cfg(feature = "vdso_only")]
 #[unsafe(no_mangle)]
 pub extern "C" fn exit_poll(fut: *mut ExitFuture, cx: &mut core::task::Context<'_>) -> Poll<()> {
     let fut = unsafe { &mut *fut };

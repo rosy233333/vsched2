@@ -485,7 +485,7 @@ pub(crate) fn switch_vspace(vspace_pid: usize) {
 
 /// 根据上一任务（也就是已运行过的CURRENT_TASK）的状态，
 /// 将上一任务放入对应的位置。
-fn push_prev_task(state: TaskState, wait_queue_id: Option<usize>) {
+fn push_prev_task(state: TaskState, wait_queue_id: Option<u32>) {
     match state {
         TaskState::Ready => {
             // Push to the task's own scheduler, not blindly to current_scheduler.

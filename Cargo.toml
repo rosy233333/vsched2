@@ -6,8 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# vdso_helper = { git = "https://github.com/rosy233333/vdso_crate_template.git" }
-vdso_helper = { git = "https://github.com/rosy233333/vdso_crate_template.git", features = [
+# vdso_helper = { path = "../vdso_crate_template/vdso_helper", features = [
+#     "log",
+# ] }
+vdso_helper = { git = "https://github.com/rosy233333/vdso_crate_template.git", rev = "5ed6e9c074e6cf803ca68d642ec075f2cb2ec3d3", features = [
     "log",
 ] }
 spin = { version = "0.10", default-features = false, features = [
@@ -19,8 +21,10 @@ heapless = "0.9.2"
 kernel_guard = "0.2"
 
 [build-dependencies]
-# vdso_helper = {  }
-vdso_helper = { git = "https://github.com/rosy233333/vdso_crate_template.git", features = [
+# vdso_helper = { path = "../vdso_crate_template/vdso_helper", features = [
+#     "log",
+# ] }
+vdso_helper = { git = "https://github.com/rosy233333/vdso_crate_template.git", rev = "5ed6e9c074e6cf803ca68d642ec075f2cb2ec3d3", features = [
     "log",
 ] }
 
