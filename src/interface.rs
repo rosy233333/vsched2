@@ -59,7 +59,7 @@ trait_interface! {
         /// 不需切换地址空间，不需设置当前栈。
         fn restore_context(&self);
         /// 恢复协程上下文，函数返回时自动保存了协程上下文
-        fn poll(&self) -> Poll<isize>;
+        fn poll(&self, cx: &mut core::task::Context<'_>) -> Poll<isize>;
         /// 获取线程上下文保存的`Stack`指针
         fn thread_stack(&self) -> *mut ();
         /// 设置协程运行返回值

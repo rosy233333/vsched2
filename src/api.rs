@@ -278,7 +278,7 @@ pub extern "C" fn push_task_into_current(task: *const ()) -> bool {
 
 /// 将任务放入它所属的就绪队列。
 ///
-/// 因为涉及到对其它地址空间的就绪队列的操作，因此只能在内核调用。
+/// 可以在内核或用户态调用。在用户态调用时，如果传入任务不属于当前进程，则会失败。
 ///
 /// task指针指向实现了`Task` trait的类型。
 ///
@@ -287,25 +287,39 @@ pub extern "C" fn push_task_into_current(task: *const ()) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn push_task(task: *const ()) -> bool {
     let task = unsafe { TaskVirtImpl::from_ptr(task) };
-    let scheduler = if task.is_kernel() {
-        USER_SCHEDULER.get().unwrap() // 在内核，USER_SCHEDULER代表内核调度器
+    let cpu_id = SMPVirtImpl::cpu_id();
+    let in_kernel = get_vvar_data!(IN_KERNEL)[cpu_id].load(Ordering::Acquire);
+    let scheduler = if in_kernel {
+        if task.is_kernel() {
+            USER_SCHEDULER.get().unwrap() // 在内核，USER_SCHEDULER代表内核调度器
+        } else {
+            // 获取任务pid对应的用户态调度器
+            let pid = task.pid();
+            if get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
+                .valid
+                .load(Ordering::Acquire)
+                == false
+            {
+                return false;
+            }
+            let ptr = get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
+                .scheduler
+                .load(Ordering::Acquire);
+            if ptr.is_null() {
+                return false;
+            }
+            unsafe { &*ptr }
+        }
     } else {
-        // 获取任务pid对应的用户态调度器
-        let pid = task.pid();
-        if get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
-            .valid
-            .load(Ordering::Acquire)
-            == false
-        {
+        if task.is_kernel() {
             return false;
         }
-        let ptr = get_vvar_data!(PROCESS_INFO_TABLE).table[pid]
-            .scheduler
-            .load(Ordering::Acquire);
-        if ptr.is_null() {
+        let task_pid = task.pid();
+        let current_pid = get_vvar_data!(CURRENT_VSPACE)[cpu_id].load(Ordering::Acquire);
+        if task_pid != current_pid {
             return false;
         }
-        unsafe { &*ptr }
+        USER_SCHEDULER.get().unwrap()
     };
     scheduler.push_task(task).is_ok()
 }

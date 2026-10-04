@@ -8,6 +8,7 @@ use core::{sync::atomic::Ordering, task::Poll};
 
 use crate::{
     arch::{assert_disable_irq, wait_irqs},
+    block_and_wake::waker::waker_from_task,
     current::{
         self, get_current_task, get_user_data, set_current_task, STACK_HANDLER, USER_SCHEDULER,
     },
@@ -20,7 +21,7 @@ use crate::{
     schedule::scheduler::Scheduler,
     set_pre_stack,
     stack::{coroutine_trampoline, tep2_trampoline, thread_trampoline},
-    Stack, StackVirtImpl, TrapInfo, CPU_NUM,
+    SchedAction, Stack, StackVirtImpl, TrapInfo, CPU_NUM,
 };
 use kernel_guard::{BaseGuard, IrqSave};
 use vdso_helper::{
@@ -314,13 +315,13 @@ pub(crate) extern "C" fn thread_entry_phase2() -> usize {
     //         push_prev_task(state);
     //     }
     // }
-    match current_task.set_action(crate::SchedAction::JustBlock) {
-        crate::SchedAction::JustBlock => unreachable!(),
-        crate::SchedAction::Yield => {
+    match current_task.set_action(SchedAction::JustBlock) {
+        SchedAction::JustBlock => unreachable!(),
+        SchedAction::Yield => {
             current_task.set_state(TaskState::Ready);
             push_prev_task(TaskState::Ready, None);
         }
-        crate::SchedAction::Block(id) => {
+        SchedAction::Block(id) => {
             if todo!("判断阻塞队列信号量>0") {
                 current_task.set_state(TaskState::Blocked);
                 push_prev_task(TaskState::Blocked, Some(id));
@@ -331,7 +332,7 @@ pub(crate) extern "C" fn thread_entry_phase2() -> usize {
                 push_prev_task(TaskState::Ready, None);
             }
         }
-        crate::SchedAction::Exit => {
+        SchedAction::Exit => {
             current_task.set_state(TaskState::Exited);
             push_prev_task(TaskState::Exited, None);
         }
@@ -752,10 +753,18 @@ pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
     let current_task = get_current_task();
     let prev_state = current_task.set_state(TaskState::Running);
     assert!(prev_state == TaskState::Ready || prev_state == TaskState::Blocked);
+    // 以下两句仅用于验证Action。若逻辑正确，此处是不需要设置Action的。
+    // 在运行线程的位置不需验证，因为可能有一些情况（如先设置了Action再被中断的恢复时）
+    // Action不为JustBlock，但仍然需要运行线程。
+    let prev_action = current_task.set_action(SchedAction::JustBlock);
+    assert!(prev_action == SchedAction::JustBlock);
+
+    let waker = waker_from_task(current_task);
+    let mut cx = core::task::Context::from_waker(&waker);
     assert_disable_irq("before run coroutine");
     let irq_state = current_task.get_irq_state();
     IrqSave::release(irq_state);
-    let res = current_task.poll();
+    let res = current_task.poll(&mut cx);
     // ************** 协程主动让权的入口 **************
     // let state = current_task.state();
     let irq_state = IrqSave::acquire();
@@ -815,18 +824,18 @@ pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
             //     }
             // }
             let guard = current_task.state_lock_acquire();
-            match current_task.set_action(crate::SchedAction::JustBlock) {
-                crate::SchedAction::JustBlock => {
+            match current_task.set_action(SchedAction::JustBlock) {
+                SchedAction::JustBlock => {
                     current_task.set_state(TaskState::Blocked);
                     current_task.state_lock_release(guard);
                     push_prev_task(TaskState::Blocked, None);
                 }
-                crate::SchedAction::Yield => {
+                SchedAction::Yield => {
                     current_task.state_lock_release(guard);
                     current_task.set_state(TaskState::Ready);
                     push_prev_task(TaskState::Ready, None);
                 }
-                crate::SchedAction::Block(id) => {
+                SchedAction::Block(id) => {
                     current_task.state_lock_release(guard);
                     if todo!("判断阻塞队列信号量>0") {
                         current_task.set_state(TaskState::Blocked);
@@ -838,7 +847,7 @@ pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
                         push_prev_task(TaskState::Ready, None);
                     }
                 }
-                crate::SchedAction::Exit => {
+                SchedAction::Exit => {
                     current_task.state_lock_release(guard);
                     current_task.set_state(TaskState::Exited);
                     push_prev_task(TaskState::Exited, None);
