@@ -269,7 +269,7 @@ pub enum TaskState {
 /// 下一次主动进入调度器时，调度器的行为。
 ///
 /// 暂存在TCB中，在进入调度器后读取。
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum SchedAction {
     /// 阻塞，但不需要放入阻塞队列中（用于处理其它异步函数已经注册了阻塞队列的情况）
     ///
@@ -283,7 +283,10 @@ pub enum SchedAction {
     Yield,
     /// 阻塞，放入对应id的阻塞队列中
     ///
-    /// 低32位取值为2，高32位为阻塞队列id
+    /// 低32位取值为2，高32位为阻塞队列id。
+    ///
+    /// 阻塞队列id由调度器通过`alloc_block_queue`分配，OS不能自行指定；
+    /// 进入调度器后，由调度器在同一临界区内完成“检测通知”与“加入阻塞队列”。
     Block(u32),
     /// 退出
     ///

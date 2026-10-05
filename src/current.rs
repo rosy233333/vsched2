@@ -7,6 +7,8 @@ use lazyinit::LazyInit;
 use spin::mutex::SpinMutex;
 use vdso_helper::{get_vvar_data, log::warn, vvar_data};
 
+#[cfg(feature = "vdso_only")]
+use crate::block_and_wake::block_queue::BlockQueues;
 use crate::{
     interface::{SMPVirtImpl, TaskVirtImpl, UserData, UserDataVirtImpl, CPU_NUM, SMP},
     schedule::{process_info::ProcessInfoTable, scheduler::Scheduler},
@@ -111,6 +113,16 @@ pub(crate) fn set_current_task(task: &'static TaskVirtImpl) {
 /// 使用映射到用户态的vDSO时，该变量为用户态调度器；
 /// 使用映射到内核态的vDSO时，该变量为内核态调度器。
 pub(crate) static USER_SCHEDULER: LazyInit<Scheduler> = LazyInit::new();
+
+/// 当前进程的阻塞队列组（以及阻塞队列号的分配器），实现为非perCPU的私有数据。
+///
+/// 阻塞队列不需要初始化：其字段为原子变量和自旋锁，全零即为“没有任务阻塞、
+/// 所有队列号空闲”的初始状态。因此只需一个静态变量。
+///
+/// 与`USER_SCHEDULER`一样，该变量在用户态和内核态各有一份拷贝，
+/// 且每个用户进程各有一份，因此阻塞队列是进程（地址空间）、特权级私有的。
+#[cfg(feature = "vdso_only")]
+pub(crate) static BLOCK_QUEUES: BlockQueues = BlockQueues::new();
 
 /// 当前进程的栈池，实现为非perCPU的私有数据。
 pub(crate) static STACK_HANDLER: LazyInit<SpinMutex<StackHandler>> = LazyInit::new();

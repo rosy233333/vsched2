@@ -10,7 +10,8 @@ use crate::{
     arch::{assert_disable_irq, wait_irqs},
     block_and_wake::waker::waker_from_task,
     current::{
-        self, get_current_task, get_user_data, set_current_task, STACK_HANDLER, USER_SCHEDULER,
+        self, get_current_task, get_user_data, set_current_task, BLOCK_QUEUES, STACK_HANDLER,
+        USER_SCHEDULER,
     },
     get_sp,
     interface::{
@@ -290,14 +291,14 @@ pub(crate) extern "C" fn thread_entry_phase2() -> usize {
     //         //     "thread entry: current task {:#x}, state Blocking -> Blocked",
     //         //     current_task as *const _ as usize
     //         // );
-    //         push_prev_task(TaskState::Blocked);
+    //         push_prev_task(TaskState::Blocked, None);
     //     }
     //     TaskState::Running => {
     //         // warn!(
     //         //     "thread entry: current task {:#x}, state Running -> Blocked",
     //         //     current_task as *const _ as usize
     //         // );
-    //         push_prev_task(TaskState::Blocked);
+    //         push_prev_task(TaskState::Blocked, None);
     //     }
     //     TaskState::Blocked => {
     //         panic!(
@@ -322,15 +323,10 @@ pub(crate) extern "C" fn thread_entry_phase2() -> usize {
             push_prev_task(TaskState::Ready, None);
         }
         SchedAction::Block(id) => {
-            if todo!("判断阻塞队列信号量>0") {
-                current_task.set_state(TaskState::Blocked);
-                push_prev_task(TaskState::Blocked, Some(id));
-                todo!("释放阻塞队列信号量的锁");
-            } else {
-                todo!("释放阻塞队列信号量的锁");
-                current_task.set_state(TaskState::Ready);
-                push_prev_task(TaskState::Ready, None);
-            }
+            // 标记为Blocked，实际的“检测通知 + 加入阻塞队列”在push_prev_task中完成；
+            // 此时action保持为Block(id)，供阻塞窗口检测使用。
+            current_task.set_state(TaskState::Blocked);
+            push_prev_task(TaskState::Blocked, Some(id));
         }
         SchedAction::Exit => {
             current_task.set_state(TaskState::Exited);
@@ -486,6 +482,12 @@ pub(crate) fn switch_vspace(vspace_pid: usize) {
 
 /// 根据上一任务（也就是已运行过的CURRENT_TASK）的状态，
 /// 将上一任务放入对应的位置。
+///
+/// `wait_queue_id`只在状态为`TaskState::Blocked`时有效，表示要阻塞到的阻塞队列号；
+/// 为`None`表示该任务不进入阻塞队列（例如等待外部Waker的一般Future阻塞）。
+///
+/// 状态为`TaskState::Blocked`时，本函数在同一临界区内完成“检测阻塞队列的通知”与
+/// “加入阻塞队列”：若取得了通知，则任务实际上不阻塞，改为放回就绪队列。
 fn push_prev_task(state: TaskState, wait_queue_id: Option<u32>) {
     match state {
         TaskState::Ready => {
@@ -518,8 +520,27 @@ fn push_prev_task(state: TaskState, wait_queue_id: Option<u32>) {
             current_task.dealloc();
         }
         TaskState::Blocked => {
-            if let Some(wait_queue_id) = wait_queue_id {
-                todo!("放入阻塞队列");
+            if let Some(id) = wait_queue_id {
+                let current_task = get_current_task();
+                // 持有任务状态锁，使“检测通知 + 入队 + 设置状态”与对本任务的
+                // 状态/action访问（如Waker取消阻塞）互斥。锁顺序为
+                // 任务状态锁 -> 阻塞队列锁（见block_queue模块说明）。
+                let guard = current_task.state_lock_acquire();
+                let blocked = BLOCK_QUEUES.block_or_resume(id, current_task);
+                current_task.state_lock_release(guard);
+                assert_eq!(
+                    current_task.state(),
+                    if blocked {
+                        TaskState::Blocked
+                    } else {
+                        TaskState::Ready
+                    },
+                    "push_prev_task: unexpected task state after blocking"
+                );
+                if !blocked {
+                    // 取得了通知，任务实际上不需要阻塞，放回就绪队列。
+                    push_prev_task(TaskState::Ready, None);
+                }
             }
         }
         _state => {}
@@ -795,7 +816,7 @@ pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
             //         //     "coroutine entry: current task {:#x}, state Blocking -> Blocked",
             //         //     current_task as *const _ as usize
             //         // );
-            //         push_prev_task(TaskState::Blocked);
+            //         push_prev_task(TaskState::Blocked, None);
             //     }
             //     TaskState::Running => {
             //         // 协程主动让权时，可能设置了任务状态也可能不设置。
@@ -805,7 +826,7 @@ pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
             //         //     "coroutine entry: current task {:#x}, state Running -> Blocked",
             //         //     current_task as *const _ as usize
             //         // );
-            //         push_prev_task(TaskState::Blocked);
+            //         push_prev_task(TaskState::Blocked, None);
             //     }
             //     TaskState::Blocked => {
             //         panic!(
@@ -836,16 +857,11 @@ pub(crate) unsafe extern "C" fn run_coroutine() -> usize {
                     push_prev_task(TaskState::Ready, None);
                 }
                 SchedAction::Block(id) => {
+                    // 与线程入口同理：标记为Blocked，实际的入队在push_prev_task中完成；
+                    // 此时action保持为Block(id)，供阻塞窗口检测使用。
                     current_task.state_lock_release(guard);
-                    if todo!("判断阻塞队列信号量>0") {
-                        current_task.set_state(TaskState::Blocked);
-                        push_prev_task(TaskState::Blocked, Some(id));
-                        todo!("释放阻塞队列信号量的锁");
-                    } else {
-                        todo!("释放阻塞队列信号量的锁");
-                        current_task.set_state(TaskState::Ready);
-                        push_prev_task(TaskState::Ready, None);
-                    }
+                    current_task.set_state(TaskState::Blocked);
+                    push_prev_task(TaskState::Blocked, Some(id));
                 }
                 SchedAction::Exit => {
                     current_task.state_lock_release(guard);

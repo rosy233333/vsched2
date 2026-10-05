@@ -1,10 +1,13 @@
 #[cfg(feature = "vdso_only")]
 use crate::{
-    current::{get_current_task, get_user_addr, get_user_data, STACK_HANDLER, USER_SCHEDULER},
+    block_and_wake::block_queue,
+    current::{
+        get_current_task, get_user_addr, get_user_data, BLOCK_QUEUES, STACK_HANDLER, USER_SCHEDULER,
+    },
     schedule::scheduler::Scheduler,
     set_pre_stack,
     stack::StackHandler,
-    SMPVirtImpl, StackVirtImpl, Task, TaskVirtImpl, TrapInfo, TrapInfoVirtImpl, SMP,
+    SMPVirtImpl, SchedAction, StackVirtImpl, Task, TaskVirtImpl, TrapInfo, TrapInfoVirtImpl, SMP,
 };
 #[cfg(feature = "vdso_only")]
 use core::{pin::Pin, sync::atomic::Ordering};
@@ -501,3 +504,156 @@ pub extern "C" fn exit_poll(fut: *mut ExitFuture, cx: &mut core::task::Context<'
 }
 
 async_api!(exit_async, ExitFuture, exit_poll);
+
+// ----------阻塞队列API----------
+
+/// 可用的阻塞队列数量，也就是队列号的上界。
+#[cfg(feature = "vdso_only")]
+#[unsafe(no_mangle)]
+pub extern "C" fn block_queue_count() -> usize {
+    crate::BLOCK_QUEUE_NUM
+}
+
+/// 分配一个阻塞队列号。
+///
+/// 返回值：分配到的队列号；若没有空闲队列，则返回`u32::MAX`。
+#[cfg(feature = "vdso_only")]
+#[unsafe(no_mangle)]
+pub extern "C" fn alloc_block_queue() -> u32 {
+    BLOCK_QUEUES.alloc().unwrap_or(u32::MAX)
+}
+
+/// 归还一个阻塞队列号，返回是否成功。
+///
+/// 要求该队列上没有阻塞的任务，否则返回`false`且不归还。
+#[cfg(feature = "vdso_only")]
+#[unsafe(no_mangle)]
+pub extern "C" fn free_block_queue(id: u32) -> bool {
+    BLOCK_QUEUES.free(id)
+}
+
+/// 取得阻塞队列号对应的队列指针（不透明），不存在时返回空指针。
+///
+/// 该指针只应在创建它的地址空间中使用，且不应用作跨地址空间的标识。
+#[cfg(feature = "vdso_only")]
+#[unsafe(no_mangle)]
+pub extern "C" fn current_block_queue_ptr(id: u32) -> *const () {
+    match BLOCK_QUEUES.get(id) {
+        Some(queue) => queue as *const _ as *const (),
+        None => core::ptr::null(),
+    }
+}
+
+/// 查询阻塞在指定队列上的任务数量；队列不存在时返回0。
+#[cfg(feature = "vdso_only")]
+#[unsafe(no_mangle)]
+pub extern "C" fn block_queue_len(id: u32) -> usize {
+    match BLOCK_QUEUES.get(id) {
+        Some(queue) => queue.len(),
+        None => 0,
+    }
+}
+
+// /// 取得当前任务挂起所在的阻塞队列号；未挂起时返回`u32::MAX`。
+// #[cfg(feature = "vdso_only")]
+// #[unsafe(no_mangle)]
+// pub extern "C" fn current_task_block_queue_id() -> u32 {
+//     block_queue::current_task_block_queue_id()
+// }
+
+/// 线程阻塞到指定的阻塞队列。
+///
+/// 返回时，当前线程已被唤醒，或者因为取得了通知而无需阻塞。
+///
+/// 需要与 [`block_wake`] / [`block_wake_all`] / [`block_wake_task`] 配合使用：
+/// 不能用Waker唤醒阻塞在本队列上的线程。
+#[cfg(feature = "vdso_only")]
+#[unsafe(no_mangle)]
+pub extern "C" fn block(id: u32) {
+    let current = get_current_task();
+    current.set_action(SchedAction::Block(id));
+    current.set_irq_state(IrqSave::acquire());
+    current.resched();
+    let state = current.get_irq_state();
+    IrqSave::release(state);
+}
+
+/// 协程阻塞的状态数据。
+///
+/// 用户不应直接构造该类型，而应使用 [`block_async`]。
+#[repr(C)]
+pub struct BlockFuture {
+    /// 要阻塞到的阻塞队列号。
+    id: u32,
+    /// 是否已经阻塞过：为`true`表示本次阻塞已经结束（已被唤醒）。
+    parked: bool,
+}
+
+impl BlockFuture {
+    /// 创建一个阻塞到队列号为`id`的阻塞队列的Future状态。
+    ///
+    /// `id`需要是由[`alloc_block_queue`]分配且尚未归还的队列号。
+    pub fn new(id: u32) -> Self {
+        Self { id, parked: false }
+    }
+}
+
+/// 协程阻塞到指定的阻塞队列。
+///
+/// 该Future由 [`block_async`] 使用。
+#[cfg(feature = "vdso_only")]
+#[unsafe(no_mangle)]
+pub extern "C" fn block_poll(fut: *mut BlockFuture, cx: &mut core::task::Context<'_>) -> Poll<()> {
+    let _ = cx;
+    let fut = unsafe { &mut *fut };
+    if fut.parked {
+        // 已经被唤醒
+        return Poll::Ready(());
+    }
+    let current = get_current_task();
+    current.set_action(SchedAction::Block(fut.id));
+    fut.parked = true;
+    Poll::Pending
+}
+
+async_api!(block_async, BlockFuture, block_poll);
+
+/// 唤醒一个阻塞在指定队列上的任务。
+///
+/// 返回值：是否取出了任务。返回`false`表示没有阻塞中的任务，本次调用只缓存了一个通知。
+#[cfg(feature = "vdso_only")]
+#[unsafe(no_mangle)]
+pub extern "C" fn wake(id: u32) -> bool {
+    block_queue::wake(id)
+}
+
+/// 唤醒当前阻塞在指定队列上的全部任务，返回被唤醒的任务数。
+///
+/// 之后到来的任务仍然需要等待（若要使之后的任务也不阻塞，使用
+/// [`block_wake_all_including_future`]）。
+#[cfg(feature = "vdso_only")]
+#[unsafe(no_mangle)]
+pub extern "C" fn wake_all(id: u32) -> usize {
+    block_queue::wake_all(id, false)
+}
+
+/// 唤醒当前及之后阻塞在指定队列上的全部任务，返回当前被唤醒的任务数。
+///
+/// 该函数把队列置为“永久放行”状态，因此之后到来的任务也不会阻塞。
+#[cfg(feature = "vdso_only")]
+#[unsafe(no_mangle)]
+pub extern "C" fn wake_all_including_future(id: u32) -> usize {
+    block_queue::wake_all(id, true)
+}
+
+/// 定向唤醒一个任务，返回是否成功。
+///
+/// 只有阻塞在指定队列上的任务才能被该函数唤醒。若任务不在该队列上（例如已经
+/// 被唤醒、尚未入队或阻塞在其它队列上），返回`false`且不修改任何状态。
+/// 本函数不做降级处理，是否需要改为 [`block_wake`] 由调用方决定。
+#[cfg(feature = "vdso_only")]
+#[unsafe(no_mangle)]
+pub extern "C" fn wake_task(id: u32, task: *const ()) -> bool {
+    let task = unsafe { TaskVirtImpl::from_ptr(task) };
+    block_queue::wake_task(id, task)
+}

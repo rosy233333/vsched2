@@ -10,6 +10,12 @@ fn main() {
         const READY_QUEUE_SIZE: usize = 256;
         /// trap等待队列大小
         const TRAP_WAIT_QUEUE_SIZE: usize = 256;
+        /// 单个调度器内的阻塞队列数量
+        ///
+        /// 上限为64，因为阻塞队列号的分配使用一个`AtomicU64`位图。
+        const BLOCK_QUEUE_NUM: usize = 16;
+        /// 单条阻塞队列中阻塞任务的数量上限
+        const BLOCK_QUEUE_SIZE: usize = 64;
         /// 任务最低优先级
         const LOWEST_PRIORITY: isize = 15;
         /// 任务最高优先级

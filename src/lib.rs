@@ -7,7 +7,7 @@
 pub mod api;
 #[cfg(feature = "vdso_only")]
 mod arch;
-mod block_and_wake;
+pub(crate) mod block_and_wake;
 #[allow(non_snake_case)]
 #[allow(missing_docs)]
 pub mod current;
