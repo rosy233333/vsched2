@@ -40,18 +40,6 @@ use crate::SchedAction;
 /// 永久放行的通知计数值
 const PERMANENT_RELEASE: isize = isize::MAX;
 
-// 由OS提供的接口：把任务放入它所属的就绪队列。
-//
-// 与`crate::api::push_task`是同一个函数：这里的`extern "C"`声明与vDSO私有数据
-// 完全无关，因此即使在不能直接调用`api`模块中函数的场合（例如在api库中通过函数
-// 指针调用）也能使用。
-extern "C" {
-    /// 将一个任务放入它所属的就绪队列，参数为指向实现`Task` trait的类型的指针。
-    ///
-    /// 返回值表示是否成功放入。
-    fn push_task(task: *const ()) -> bool;
-}
-
 /// 一组阻塞队列，及队列号的分配器。
 ///
 /// 以静态变量形式存在于vDSO私有数据区（[`crate::current::BLOCK_QUEUES`]）。
@@ -73,7 +61,10 @@ impl BlockQueues {
             allocated: AtomicU64::new(0),
         }
     }
+}
 
+#[cfg(feature = "vdso_only")]
+impl BlockQueues {
     /// 分配一条空闲队列，返回其队列号；若无空闲队列则返回`None`。
     pub(crate) fn alloc(&self) -> Option<u32> {
         let result =
@@ -165,7 +156,10 @@ impl BlockQueue {
             }),
         }
     }
+}
 
+#[cfg(feature = "vdso_only")]
+impl BlockQueue {
     /// 尝试阻塞`task`。
     ///
     /// 返回`true`表示任务已经被加入本队列（调用方应把任务置为`Blocked`）；
@@ -194,18 +188,36 @@ impl BlockQueue {
 
     /// 唤醒一个任务。
     ///
-    /// 返回被唤醒（已从本队列取出）的任务：`None`表示没有阻塞中的任务，
-    /// 本次调用只是缓存了一个通知或队列处于永久放行状态。
+    /// 返回被唤醒（已从本队列取出）的任务；
+    /// `None`表示没有阻塞中的任务，本次调用只是缓存了一个通知或队列处于永久放行状态。
     pub(crate) fn unpark_one(&self) -> Option<&'static TaskVirtImpl> {
         let mut inner = self.state.lock();
         if inner.notifications != PERMANENT_RELEASE {
             inner.notifications += 1;
         }
-        if inner.notifications >= 0 {
+        if inner.notifications > 0 {
             // 没有阻塞中的任务：本次调用只缓存了通知。
             return None;
         }
-        inner.tasks.pop_front()
+        inner
+            .tasks
+            .pop_front()
+            .or_else(|| panic!("unpark_one: queue empty when it shouldn't!"))
+    }
+
+    /// 唤醒一个任务，但若未能唤醒任务，则不缓存通知。
+    pub(crate) fn unpark_one_without_notification(&self) -> Option<&'static TaskVirtImpl> {
+        let mut inner = self.state.lock();
+        if inner.notifications < 0 {
+            inner.notifications += 1;
+        } else {
+            // 没有阻塞中的任务：本次调用不缓存通知。
+            return None;
+        }
+        inner
+            .tasks
+            .pop_front()
+            .or_else(|| panic!("unpark_one_without_notification: queue empty when it shouldn't!"))
     }
 
     /// 取出全部当前阻塞的任务，并按情况调整通知计数。
@@ -277,14 +289,17 @@ impl BlockQueue {
 ///
 /// 通过调用vDSO的`push_task`接口完成，因此不依赖调度器实例。
 /// 调用时不应持有任务状态锁或阻塞队列锁。
+#[cfg(feature = "vdso_only")]
 fn push_ready(task: &'static TaskVirtImpl) -> bool {
-    unsafe { push_task(task.to_ptr()) }
+    use crate::push_task;
+    push_task(task.to_ptr())
 }
 
 /// 把任务置为`Ready`并放回就绪队列。
 ///
 /// 该任务已经不在阻塞队列中（已被取出），因此只需处理状态与就绪队列。
 /// 与[`prepare_ready`]一样，不会清除当前任务自己的action。
+#[cfg(feature = "vdso_only")]
 fn wake_ready(task: &'static TaskVirtImpl) {
     prepare_ready(task);
     push_ready_or_panic(task);
@@ -294,6 +309,7 @@ fn wake_ready(task: &'static TaskVirtImpl) {
 ///
 /// 若任务是当前任务（自我唤醒），则只检查状态：此时任务处于运行态，既不能再次获取
 /// 自己的状态锁，也不能清除自己的action（调度器入口还要读取它）。
+#[cfg(feature = "vdso_only")]
 fn prepare_ready(task: &'static TaskVirtImpl) {
     if core::ptr::eq(task, get_current_task()) {
         debug_assert!(
@@ -309,6 +325,7 @@ fn prepare_ready(task: &'static TaskVirtImpl) {
 }
 
 /// 把任务放回就绪队列，失败时panic。
+#[cfg(feature = "vdso_only")]
 fn push_ready_or_panic(task: &'static TaskVirtImpl) {
     assert!(
         push_ready(task),
@@ -320,6 +337,7 @@ fn push_ready_or_panic(task: &'static TaskVirtImpl) {
 /// 唤醒一个阻塞在指定队列上的任务，或缓存一个通知。
 ///
 /// 返回值：是否取出了任务。返回`false`表示没有阻塞中的任务，本次调用只缓存了一个通知。
+#[cfg(feature = "vdso_only")]
 pub(crate) fn wake(id: u32) -> bool {
     let Some(queue) = BLOCK_QUEUES.get(id) else {
         return false;
@@ -337,6 +355,7 @@ pub(crate) fn wake(id: u32) -> bool {
 ///
 /// `including_future`为`true`时，之后到来的任务也不会阻塞，直到队列被重置
 /// （见`block_wake_all`的说明）。
+#[cfg(feature = "vdso_only")]
 pub(crate) fn wake_all(id: u32, including_future: bool) -> usize {
     let Some(queue) = BLOCK_QUEUES.get(id) else {
         return 0;
@@ -348,6 +367,7 @@ pub(crate) fn wake_all(id: u32, including_future: bool) -> usize {
 ///
 /// 返回`false`表示该任务没有阻塞在指定队列上，此时不修改任何状态。
 /// 本函数不做降级处理（不会改为投递一个通知），是否需要降级由OS决定。
+#[cfg(feature = "vdso_only")]
 pub(crate) fn wake_task(id: u32, task: &'static TaskVirtImpl) -> bool {
     let Some(queue) = BLOCK_QUEUES.get(id) else {
         return false;
@@ -360,15 +380,3 @@ pub(crate) fn wake_task(id: u32, task: &'static TaskVirtImpl) -> bool {
         return false;
     }
 }
-
-// /// 取得当前任务挂起所在的阻塞队列号；未挂起时返回`u32::MAX`。
-// pub(crate) fn current_task_block_queue_id() -> u32 {
-//     let current = get_current_task();
-//     let guard = current.state_lock_acquire();
-//     let action = current.set_action(SchedAction::JustBlock);
-//     current.state_lock_release(guard);
-//     match action {
-//         SchedAction::Block(id) => id,
-//         _ => u32::MAX,
-//     }
-// }

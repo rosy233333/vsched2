@@ -86,6 +86,7 @@ pub(crate) struct Scheduler {
 unsafe impl Send for Scheduler {}
 unsafe impl Sync for Scheduler {}
 
+#[cfg(feature = "vdso_only")]
 impl Scheduler {
     /// 计算字段相对 self 基址的偏移量
     fn field_offset<T>(&self, field: *const T) -> usize {

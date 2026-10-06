@@ -7,7 +7,6 @@ use lazyinit::LazyInit;
 use spin::mutex::SpinMutex;
 use vdso_helper::{get_vvar_data, log::warn, vvar_data};
 
-#[cfg(feature = "vdso_only")]
 use crate::block_and_wake::block_queue::BlockQueues;
 use crate::{
     interface::{SMPVirtImpl, TaskVirtImpl, UserData, UserDataVirtImpl, CPU_NUM, SMP},
@@ -121,7 +120,6 @@ pub(crate) static USER_SCHEDULER: LazyInit<Scheduler> = LazyInit::new();
 ///
 /// 与`USER_SCHEDULER`一样，该变量在用户态和内核态各有一份拷贝，
 /// 且每个用户进程各有一份，因此阻塞队列是进程（地址空间）、特权级私有的。
-#[cfg(feature = "vdso_only")]
 pub(crate) static BLOCK_QUEUES: BlockQueues = BlockQueues::new();
 
 /// 当前进程的栈池，实现为非perCPU的私有数据。
