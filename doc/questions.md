@@ -28,8 +28,8 @@
 
 | ID | 优先级 | 问题 | 类型 | 影响 | 现状/倾向 | 阻塞谁 | 详见 | 状态 |
 |---|---|---|---|---|---|---|---|---|
-| Q-041 | P1 | 如何实现跨进程唤醒用户任务，并让唤醒携带数据？ | 设计 | 跨进程唤醒/IPC | 未定；需要把任务放入目标用户调度器并携带结果 | IPC/Step 2 | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | open |
-| Q-042 | P1 | 同步系统调用与异步系统调用是否共用 TrapInfo 发送队列？ | 设计 | 队列/安全/所有权 | 可能复用；队列需放 VVAR，安全/所有权未定 | IPC/Step 2 | [0003 Step 2](plans/0003-scheduler-refactor/README.md)、[设计·调度循环](design/scheduling-loop.md) | open |
+| Q-041 | P1 | 如何实现跨进程唤醒用户任务，并让唤醒携带数据？ | 设计 | 跨进程唤醒/IPC | 方案选定 VVAR 接收队列；数据/无在线任务/抢占等未决 | IPC/Step 2 | [设计·跨进程唤醒](design/cross-process-wake.md)、[0003 Step 2](plans/0003-scheduler-refactor/README.md) | leaning |
+| Q-042 | P1 | 同步系统调用与异步系统调用是否共用 TrapInfo 发送队列？ | 设计 | 队列/安全/所有权 | 可能复用；队列需放 VVAR，安全/所有权未定 | IPC/Step 2 | [设计·通信](design/communication.md)、[0003 Step 2](plans/0003-scheduler-refactor/README.md) | open |
 | Q-022 | P2 | 异步系统调用模块是否独立 vDSO / 归入 IPC 模块？ | 设计 | 模块边界 | 倾向独立 | 模块拆分 | [代码实现设计·异步系统调用模块](<draft/新版设计/共享调度器模块代码实现设计.md#异步系统调用模块>) | leaning |
 
 ### 可重入与并发

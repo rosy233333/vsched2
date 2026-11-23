@@ -108,6 +108,8 @@ vsched2/
     ├── design/
     │   ├── README.md             # existing：设计索引/状态
     │   ├── user-interrupt-context.md  # existing：用户态任务中断上下文
+    │   ├── cross-process-wake.md # existing：跨进程唤醒
+    │   ├── communication.md      # existing：事件源/接收队列通信方案
     │   ├── task-model.md         # 任务/线程/协程/任务树/上下文类型
     │   ├── os-boundary.md        # OS 与调度模块各自负责什么
     │   ├── scheduler.md          # 事件源/优先级/perCPU/共享
@@ -124,7 +126,9 @@ vsched2/
     │   └── build-and-test.md     # 构建矩阵/验证方式
     ├── decisions/
     │   ├── README.md             # existing：决策索引
-    │   └── 0001-user-task-interrupt-ownership.md  # existing：D-001
+    │   ├── 0001-user-task-interrupt-ownership.md  # existing：D-001
+    │   ├── 0002-cross-process-wake.md           # existing：D-002
+    │   └── 0003-receive-queue-communication.md  # existing：D-003
     ├── plans/
     │   ├── README.md             # existing：计划索引
     │   └── 0003-scheduler-refactor/      # existing：README + step-*

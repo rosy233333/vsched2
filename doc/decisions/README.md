@@ -5,3 +5,5 @@
 | ID | 决策 | 状态 | 相关 |
 |---|---|---|---|
 | D-001 | [被中断的用户态任务仍属于用户态任务](0001-user-task-interrupt-ownership.md) | accepted | Q-007、`design/user-interrupt-context.md` |
+| D-002 | [跨进程唤醒采用 VVAR 接收队列](0002-cross-process-wake.md) | accepted | Q-041、`design/cross-process-wake.md` |
+| D-003 | [通信队列改为接收队列接入调度器外部](0003-receive-queue-communication.md) | accepted | Q-042、`design/communication.md` |
