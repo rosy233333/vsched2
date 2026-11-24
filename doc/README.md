@@ -81,7 +81,7 @@
 | [共享调度器模块设计文档](draft/新版设计/共享调度器模块设计文档.md) | design | 任务模型、事件源、调度路径、可重入方向 | draft | 拆到 `design/*` |
 | [共享调度器模块代码实现设计](draft/新版设计/共享调度器模块代码实现设计.md) | design | 模块职责、接口、数据结构、上下文保存约定 | draft | 接口→`reference/interfaces.md`；结构→`reference/module-map.md`；设计→`design/*` |
 | [数据结构修改](draft/新版设计/数据结构修改.md) | design 素材 | TCB、Trap、状态字段的修改提案 | draft | 转成接口变更表或 design 的差异表，不单独保留 |
-| [调度器可重入设计文档](draft/可重入分析/调度器可重入设计文档.md) | analysis | 可重入问题、共享数据、时点分析 | draft | 目标→`design/reentrancy.md`；分析→`analysis/reentrancy/` |
+| [调度器可重入设计文档](draft/可重入分析/调度器可重入设计文档.md) | analysis | 可重入问题、共享数据、时点分析 | draft | 目标→`design/reentrancy.md` + `design/kernel-shadow-task.md`；分析→`analysis/reentrancy/` |
 | [二维分析.xlsx](draft/可重入分析/二维分析.xlsx) | analysis 素材 | 时间 × 空间矩阵 | draft | 结论抽到 `analysis/reentrancy/matrix.md`；xlsx 作附件 |
 | [0.开题版设计/](archive/0.开题版设计/) | archive | 开题阶段思路：Rel4 异步 IPC、协程阻塞唤醒、io_uring 与协程整合 | archive | 只读；结论提炼到 `design/` 或 `decisions/` |
 | [1.初版实现/](archive/1.初版实现/) | archive | 第一版实现：调度器设计、重构思路、WFI、trap handler、流程图 | archive | 只读；结论提炼到 `reference/` 或 `design/` |
@@ -115,7 +115,8 @@ vsched2/
     │   ├── scheduler.md          # 事件源/优先级/perCPU/共享
     │   ├── scheduling-loop.md    # existing：调度循环路径（Step 1）
     │   ├── blocking.md           # 阻塞队列/Waker/丢失唤醒
-    │   └── reentrancy.md         # 可重入目标设计
+    │   ├── reentrancy.md         # existing：可重入总览
+    │   └── kernel-shadow-task.md # existing：内核影子任务
     ├── reference/
     │   ├── README.md             # 覆盖矩阵 + 契约卡模板
     │   ├── module-map.md         # 模块契约卡（约 9 个模块）
@@ -128,7 +129,8 @@ vsched2/
     │   ├── README.md             # existing：决策索引
     │   ├── 0001-user-task-interrupt-ownership.md  # existing：D-001
     │   ├── 0002-cross-process-wake.md           # existing：D-002
-    │   └── 0003-receive-queue-communication.md  # existing：D-003
+    │   ├── 0003-receive-queue-communication.md  # existing：D-003
+    │   └── 0004-kernel-shadow-task.md           # existing：D-004
     ├── plans/
     │   ├── README.md             # existing：计划索引
     │   └── 0003-scheduler-refactor/      # existing：README + step-*

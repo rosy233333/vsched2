@@ -59,6 +59,7 @@
 
 | ID | 优先级 | 问题 | 类型 | 影响 | 现状/倾向 | 阻塞谁 | 详见 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| Q-049 | P1 | `trap_handler` 完成后，是直接恢复对应的内核影子任务（不走调度、无抢占），还是正常走调度（有抢占但需管理多个影子任务）？ | 设计 | trap 恢复/抢占 | 倾向直接恢复；代价是无抢占 | 可重入/Step 3 | [设计·内核影子任务](design/kernel-shadow-task.md)、[0003 Step 3](plans/0003-scheduler-refactor/README.md) | leaning |
 | Q-024 | P2 | `trap_wait_queue` 中“用户态任务一定位于当前地址空间”的假设是否成立？ | 实现 | trap/地址空间 | 未确认 | trap | [trap_wait_queue.rs:160](../src/schedule/trap_wait_queue.rs#L160) | open |
 | Q-033 | P2 | `TrapInfo::handle` 收窄后，处理任务通过什么接口接收通信？ | 接口 | trap 通信 | `handle` 仍直接接收被 trap 任务 | trap | [数据结构修改·trap](<draft/新版设计/数据结构修改.md#trap-相关>)、[interface.rs:140](../src/interface.rs#L140) | open |
 | Q-040 | P2 | “内核态→用户态”的“线程/协程→中断”路径需要先回用户态选任务再陷入内核恢复，两次特权级切换的性能开销是否可接受？ | 设计 | 切换/性能 | 路径表已列，未评估 | 性能/Step 1 | [设计·调度循环](design/scheduling-loop.md) | open |
