@@ -59,6 +59,7 @@
 | ID | 优先级 | 问题 | 类型 | 影响 | 现状/倾向 | 阻塞谁 | 详见 | 状态 |
 |---|---|---|---|---|---|---|---|---|
 | Q-049 | P1 | `trap_handler` 完成后，是直接恢复对应的内核影子任务（不走调度、无抢占），还是正常走调度（有抢占但需管理多个影子任务）？ | 设计 | trap 恢复/抢占 | 倾向直接恢复；代价是无抢占 | 可重入/Step 3 | [设计·内核影子任务](design/kernel-shadow-task.md)、[0003 Step 3](plans/0003-scheduler-refactor/README.md) | leaning |
+| Q-050 | P1 | 用户调度器在操作 per-CPU 变量时被中断，恢复后可能在另一 CPU 运行，如何保证不按旧 `cpuid` 操作原 CPU 的变量？ | 并发 | per-CPU/迁移 | 候选：K 停放在 per-CPU 槽，handler 不阻塞，完成标志用原子操作（可能跨 CPU 完成），K 未完成时只选内核任务；Q-049 未定 | 可重入/Step 3 | [设计·内核影子任务](design/kernel-shadow-task.md)、[0003 Step 3](plans/0003-scheduler-refactor/README.md) | open |
 | Q-024 | P2 | `trap_wait_queue` 中“用户态任务一定位于当前地址空间”的假设是否成立？ | 实现 | trap/地址空间 | 未确认 | trap | [trap_wait_queue.rs:160](../src/schedule/trap_wait_queue.rs#L160) | open |
 | Q-033 | P2 | `TrapInfo::handle` 收窄后，处理任务通过什么接口接收通信？ | 接口 | trap 通信 | `handle` 仍直接接收被 trap 任务 | trap | [数据结构修改·trap](<draft/新版设计/数据结构修改.md#trap-相关>)、[interface.rs:140](../src/interface.rs#L140) | open |
 | Q-040 | P2 | “内核态→用户态”的“线程/协程→中断”路径需要先回用户态选任务再陷入内核恢复，两次特权级切换的性能开销是否可接受？ | 设计 | 切换/性能 | 路径表已列，未评估 | 性能/Step 1 | [设计·调度循环](design/scheduling-loop.md) | open |
@@ -84,24 +85,24 @@
 
 | ID | 优先级 | 问题 | 类型 | 影响 | 现状/倾向 | 阻塞谁 | 详见 | 状态 |
 |---|---|---|---|---|---|---|---|---|
-| Q-001 | P1 | `TaskState::Blocking` 能否删除？删除后如何避免“已入阻塞队列但未保存上下文”的竞态？ | 设计 | 状态机/接口 | 已在“清晰调度器边界修改”中删除 Blocking；代码残留由额外步骤清理 | — | [方案2流程图](<archive/2.清晰调度器边界修改/任务及其状态变化流程图（新版，方案2）.drawio>) | decided |
-| Q-002 | P2 | “事件源”接口是否改名？改成什么？ | 接口 | 接口/OS 适配 | 事件源已删除；旧问题关闭 | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | dropped |
-| Q-004 | P2 | 删除 `TrapInfo::new_handler` / `IdleHandler` 后，trap 处理任务和 `SCHEDULER_WAIT_CONTEXT` 如何创建？ | 接口 | trap/初始化 | 不删除；保留 `new_handler` / `IdleHandler` | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | decided |
 | Q-007 | P0 | 内核恢复无法在用户态恢复的任务（中断上下文）的路径？状态更新与任务所有权如何保证？ | 设计 | 中断上下文/所有权 | 路径已写入 `design/scheduling-loop.md`；任务归属由 D-001 固定 | — | [设计·调度循环](design/scheduling-loop.md)、[D-001](decisions/0001-user-task-interrupt-ownership.md) | decided |
-| Q-013 | P1 | `CURRENT_VSPACE` 在用户调度器提前设置、内核看到错误地址空间，如何修？ | 并发 | 地址空间 | 新调度循环中 `CURRENT_VSPACE` 只由内核修改；用户调度器不再提前设置 | — | [0003 Step 1](plans/0003-scheduler-refactor/README.md#步骤-1调度循环修改)、[设计·调度循环](design/scheduling-loop.md) | decided |
-| Q-015 | P1 | 栈的保留与回收时机？仍被当前执行流/挂起现场引用的栈如何防止提前复用？ | 设计 | 栈生命周期 | 空闲栈池设计为 per-CPU，防止提前复用 | — | [任务切换模型](plans/0003-scheduler-refactor/任务切换模型（0003版）.drawio) | decided |
-| Q-020 | P2 | 内核任务与用户任务的 TCB 是否统一保存？如何保存？ | 设计 | TCB/接口 | 保存在各自地址空间，不统一保存 | — | [数据结构修改·任务](<draft/新版设计/数据结构修改.md#任务>) | decided |
-| Q-023 | P2 | 内核是否访问调度器的 `sources` 字段？`init_except_sources` 的假设是否成立？ | 实现 | 初始化/共享数据 | `Scheduler.sources` 删除；旧问题关闭 | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | dropped |
-| Q-025 | P2 | `get_stack_type` 用 sp/fp 判断空栈是否正确？如何替换？ | 实现 | 栈/调度循环 | 不再使用 `get_stack_type` 判断栈类型；代码残留由额外步骤清理 | — | [trampoline.rs:11](../src/stack/trampoline.rs#L11)、[0003 额外步骤](plans/0003-scheduler-refactor/README.md) | decided |
-| Q-026 | P2 | `wait_for_runnable_task` 的休眠循环 bug 如何解决？ | 实现 | 多核/休眠 | 与 Q-017 是同一问题，已合并跟踪 | — | [Q-017](questions.md)、[main_loop.rs:378](../src/main_loop.rs#L378) | dropped |
 | Q-029 | P0 | `trap_handler` 是否与调度代码合并？ | 设计 | trap/调度循环 | 不合并；handler 独立，简单 trap 内联，复杂才建任务 | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | decided |
 | Q-030 | P0 | `TrapInfo` 在 trap 入口还是 `trap_handler` 中入队？ | 设计 | trap 队列/职责 | 在 trap 入口入队 | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | decided |
-| Q-031 | P2 | `Task::register_waker` 的语义和所有权是什么？与 `block_and_wake/waker.rs` 如何统一？ | 接口 | 唤醒/接口 | 不需要该接口；协程 `poll` 会自动注入 waker | — | [数据结构修改·任务](<draft/新版设计/数据结构修改.md#任务>)、[waker.rs](../src/block_and_wake/waker.rs) | decided |
-| Q-034 | P3 | 事件源是否需要动态创建？生命周期由谁管理？ | 设计 | 事件源生命周期 | 事件源删除；动态创建不再需要 | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | dropped |
-| Q-037 | P3 | 调度器 `sources` 是否需要活跃标志？ | 设计 | 调度查询/性能 | `sources` 删除；活跃标志不再需要 | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | dropped |
+| Q-001 | P1 | `TaskState::Blocking` 能否删除？删除后如何避免“已入阻塞队列但未保存上下文”的竞态？ | 设计 | 状态机/接口 | 已在“清晰调度器边界修改”中删除 Blocking；代码残留由额外步骤清理 | — | [方案2流程图](<archive/2.清晰调度器边界修改/任务及其状态变化流程图（新版，方案2）.drawio>) | decided |
+| Q-013 | P1 | `CURRENT_VSPACE` 在用户调度器提前设置、内核看到错误地址空间，如何修？ | 并发 | 地址空间 | 新调度循环中 `CURRENT_VSPACE` 只由内核修改；用户调度器不再提前设置 | — | [0003 Step 1](plans/0003-scheduler-refactor/README.md#步骤-1调度循环修改)、[设计·调度循环](design/scheduling-loop.md) | decided |
+| Q-015 | P1 | 栈的保留与回收时机？仍被当前执行流/挂起现场引用的栈如何防止提前复用？ | 设计 | 栈生命周期 | 空闲栈池设计为 per-CPU，防止提前复用 | — | [任务切换模型](plans/0003-scheduler-refactor/任务切换模型（0003版）.drawio) | decided |
 | Q-039 | P1 | Step 1 能否阻止“中断→线程/中断”非法路径？是否必须在 Step 2 让中断处理不再走调度？ | 设计 | trap/Step 2 | 新 trap 机制保证中断后一定运行 trap_handler | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | decided |
 | Q-043 | P1 | 一对一接收方用 `SchedAction::JustBlock` 等待发送方时，如何避免丢失唤醒？ | 并发 | 唤醒/所有权 | 改用 Future 阻塞流程；接收队列任务按唤醒流程，未阻塞只改 action 为 `Yield` | — | [设计·通信·一对一](design/communication.md#接收方无批处理要求一对一)、[方案2流程图](<archive/2.清晰调度器边界修改/任务及其状态变化流程图（新版，方案2）.drawio>) | decided |
 | Q-045 | P1 | 批处理接收方任务如何公布自身任务指针？ | 接口 | 指针/所有权 | 不再单独公布；VVAR 共享阻塞队列 + 信号量，发送唤醒后放入接收队列 | — | [设计·通信·批处理](design/communication.md#接收方有批处理要求多对一) | decided |
 | Q-046 | P1 | 如何判断批处理接收方任务不在线，并与唤醒同步以避免丢失/重复唤醒？ | 并发 | 离线检测/唤醒 | 由共享阻塞队列信号量同步；发送唤醒、处理递减、0/负阻塞 | — | [设计·通信·批处理](design/communication.md#接收方有批处理要求多对一) | decided |
+| Q-002 | P2 | “事件源”接口是否改名？改成什么？ | 接口 | 接口/OS 适配 | 事件源已删除；旧问题关闭 | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | dropped |
+| Q-004 | P2 | 删除 `TrapInfo::new_handler` / `IdleHandler` 后，trap 处理任务和 `SCHEDULER_WAIT_CONTEXT` 如何创建？ | 接口 | trap/初始化 | 不删除；保留 `new_handler` / `IdleHandler` | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | decided |
+| Q-020 | P2 | 内核任务与用户任务的 TCB 是否统一保存？如何保存？ | 设计 | TCB/接口 | 保存在各自地址空间，不统一保存 | — | [数据结构修改·任务](<draft/新版设计/数据结构修改.md#任务>) | decided |
+| Q-023 | P2 | 内核是否访问调度器的 `sources` 字段？`init_except_sources` 的假设是否成立？ | 实现 | 初始化/共享数据 | `Scheduler.sources` 删除；旧问题关闭 | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | dropped |
+| Q-025 | P2 | `get_stack_type` 用 sp/fp 判断空栈是否正确？如何替换？ | 实现 | 栈/调度循环 | 不再使用 `get_stack_type` 判断栈类型；代码残留由额外步骤清理 | — | [trampoline.rs:11](../src/stack/trampoline.rs#L11)、[0003 额外步骤](plans/0003-scheduler-refactor/README.md) | decided |
+| Q-026 | P2 | `wait_for_runnable_task` 的休眠循环 bug 如何解决？ | 实现 | 多核/休眠 | 与 Q-017 是同一问题，已合并跟踪 | — | [Q-017](questions.md)、[main_loop.rs:378](../src/main_loop.rs#L378) | dropped |
+| Q-031 | P2 | `Task::register_waker` 的语义和所有权是什么？与 `block_and_wake/waker.rs` 如何统一？ | 接口 | 唤醒/接口 | 不需要该接口；协程 `poll` 会自动注入 waker | — | [数据结构修改·任务](<draft/新版设计/数据结构修改.md#任务>)、[waker.rs](../src/block_and_wake/waker.rs) | decided |
+| Q-034 | P3 | 事件源是否需要动态创建？生命周期由谁管理？ | 设计 | 事件源生命周期 | 事件源删除；动态创建不再需要 | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | dropped |
+| Q-037 | P3 | 调度器 `sources` 是否需要活跃标志？ | 设计 | 调度查询/性能 | `sources` 删除；活跃标志不再需要 | — | [0003 Step 2](plans/0003-scheduler-refactor/README.md) | dropped |
 
 关闭项保留原行；`decided` 是已决定，`dropped` 是考虑过并放弃。超过约 300 行或 100 条时，把较早的关闭项移到 `questions-closed.md`。
