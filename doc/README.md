@@ -136,7 +136,7 @@ vsched2/
     │   └── 0003-scheduler-refactor/      # existing：README + step-*
     ├── analysis/
     │   ├── new-design-planned-changes.md  # existing：新版设计 vs 实现
-    │   └── reentrancy/           # planned：判定标准/矩阵/结论
+    │   └── reentrancy/           # existing：locks.md（锁盘点/无锁化分析）
     ├── assets/                   # 跨文档共享的图
     ├── draft/                    # existing：迁移中，内容逐步搬到 design/reference
     └── archive/                  # existing：历史，只读
